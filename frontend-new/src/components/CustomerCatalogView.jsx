@@ -17,7 +17,7 @@ import {
 import CompareArrowsIcon from "@mui/icons-material/CompareArrows";
 import AddIcon from "@mui/icons-material/Add";
 import CheckIcon from "@mui/icons-material/Check";
-import { useUnifiedScrollSync } from "../hooks/useUnifiedScrollSync";
+import { useCoBrowseScrollSync } from "../hooks/useCoBrowseScrollSync";
 import PackageDetailsModal from "./PackageDetailsModal";
 
 const CustomerCatalogView = ({
@@ -39,7 +39,7 @@ const CustomerCatalogView = ({
   const [selectedPackage, setSelectedPackage] = useState(null);
 
   // Co-browse scroll sync hook
-  const { scrollRef, isActiveController } = useUnifiedScrollSync(userType, true, 'catalog');
+  const { scrollRef, isActiveController } = useCoBrowseScrollSync(userType, true, 'catalog');
 
   // Effect to handle opening modal from other party's signal (handled by parent)
   useEffect(() => {

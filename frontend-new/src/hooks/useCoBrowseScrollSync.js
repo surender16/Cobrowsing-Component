@@ -136,137 +136,64 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
     }
   }, [userType, enabled, log, getSignalType, containerType]);
 
-  // Apply scroll position to the scroll container with smooth animation and delay
+  // Apply received scroll position
   const applyScrollPosition = useCallback((scrollTop, scrollLeft) => {
-    if (!scrollRef.current) {
-      log('⚠️ ScrollRef not available, cannot apply scroll position');
-      return;
-    }
-
-    log('Applying scroll position:', { scrollTop, scrollLeft });
-
-    // Mark that we're applying an incoming scroll
+    if (!scrollRef.current) return;
+    
     incomingScrollRef.current = true;
     scrollAnimationRef.current = true;
 
-    // Add a small delay before applying scroll for smoother experience
-    if (scrollDelayTimeoutRef.current) {
-      clearTimeout(scrollDelayTimeoutRef.current);
-    }
+    scrollRef.current.scrollTo({
+      top: scrollTop,
+      left: scrollLeft,
+      behavior: 'smooth'
+    });
 
-    scrollDelayTimeoutRef.current = setTimeout(() => {
-      // Double check scrollRef is still available
-      if (!scrollRef.current) {
-        log('⚠️ ScrollRef no longer available');
-        incomingScrollRef.current = false;
-        scrollAnimationRef.current = false;
-        return;
-      }
+    // Update last position
+    const newPosition = { scrollTop, scrollLeft };
+    setLastScrollPosition(newPosition);
+    lastScrollPositionRef.current = newPosition;
 
-      // Apply the scroll position smoothly
-      scrollRef.current.scrollTo({
-        top: scrollTop,
-        left: scrollLeft,
-        behavior: 'smooth'
-      });
-
-      // Update last scroll position
-      const newPosition = { scrollTop, scrollLeft };
-      setLastScrollPosition(newPosition);
-      lastScrollPositionRef.current = newPosition;
-
-      // Reset flags after animation completes
-      setTimeout(() => {
-        incomingScrollRef.current = false;
-        scrollAnimationRef.current = false;
-      }, 300); // Reduced to 300ms for smoother transitions
-    }, 30); // Reduced to 30ms for faster response
+    // Reset flags after animation
+    setTimeout(() => {
+      incomingScrollRef.current = false;
+      scrollAnimationRef.current = false;
+    }, 300);
   }, [log]);
 
   // Handle incoming scroll signals
   const handleScrollSignal = useCallback((event) => {
-    if (!enabled) {
-      log('Scroll sync disabled, ignoring signal');
-      return;
-    }
+    if (!enabled) return;
 
     try {
       const data = JSON.parse(event.data);
-      log(`📥 Received scroll signal:`, data);
+      
+      // Only process signals for matching container type
+      if (data.containerType !== containerType) return;
+      
+      // Only process signals from opposite user type
+      if (data.userType === userType) return;
 
-      // Ignore signals from a different container type
-      if (data.containerType !== containerType) {
-        log(`Ignoring signal - wrong container type (${data.containerType} vs ${containerType})`);
-        return;
-      }
-
-      // Ignore signals originating from this same connection (self), independent of userType label
-      const session = openTokSessionSingleton.getSession();
-      if (session && event.from && session.connection && event.from.connectionId === session.connection.connectionId) {
-        log('Ignoring signal - from same connection');
-        return;
-      }
-
-      // Additional check: ignore if userType matches (extra safety)
-      if (data.userType === userType) {
-        log('Ignoring signal - from same user type');
-        return;
-      }
-
-      // Track received scroll to prevent loops
-      lastReceivedScrollRef.current = {
-        scrollTop: data.scrollTop,
-        scrollLeft: data.scrollLeft,
-        timestamp: Date.now()
-      };
-
-      log(`🎯 Applying scroll position from other party:`, { scrollTop: data.scrollTop, scrollLeft: data.scrollLeft });
-
-      // Apply the scroll position to our container
+      // Apply the scroll position
       applyScrollPosition(data.scrollTop, data.scrollLeft);
 
     } catch (err) {
-      log('❌ Failed to parse scroll signal:', err);
+      console.error('Failed to parse scroll signal:', err);
     }
-  }, [enabled, log, applyScrollPosition, containerType]);
+  }, [enabled, containerType, userType, applyScrollPosition]);
 
   // Handle scroll events from the local container
   const handleScroll = useCallback((event) => {
-    log('📊 Scroll event detected');
-    
-    // Enhanced loop prevention - check multiple conditions
-    if (incomingScrollRef.current || scrollAnimationRef.current || scrollCooldownRef.current) {
-      log('Ignoring scroll event - incoming, animating, or cooldown active');
-      return; // Ignore scroll events caused by incoming signals
+    // Ignore programmatic scrolls
+    if (incomingScrollRef.current || scrollAnimationRef.current) {
+      return;
     }
 
     const { scrollTop, scrollLeft } = event.target;
-    const now = Date.now();
 
-    // Check if this scroll is too similar to the last received scroll (loop prevention)
-    const lastReceived = lastReceivedScrollRef.current;
-    const timeDiff = now - lastReceived.timestamp;
-    const positionDiff = Math.abs(scrollTop - lastReceived.scrollTop) + Math.abs(scrollLeft - lastReceived.scrollLeft);
-    
-    if (timeDiff < 1000 && positionDiff < 10) {
-      log('Ignoring scroll - too similar to recently received scroll (loop prevention)');
-      return;
-    }
-
-    // Check if scroll position actually changed significantly
-    const lastPos = lastScrollPositionRef.current;
-    const scrollThreshold = 5; // Increased threshold to reduce sensitivity
-    if (Math.abs(scrollTop - lastPos.scrollTop) < scrollThreshold &&
-      Math.abs(scrollLeft - lastPos.scrollLeft) < scrollThreshold) {
-      log('Scroll change too small, ignoring');
-      return;
-    }
-
-    // Mark this user as the active controller
+    // Mark as active controller
     isActiveControllerRef.current = true;
     setIsActiveController(true);
-
-    log('🎯 Local scroll detected - sending to other party:', { scrollTop, scrollLeft });
 
     // Set cooldown to prevent immediate feedback
     scrollCooldownRef.current = true;
@@ -277,13 +204,13 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
       scrollCooldownRef.current = false;
     }, 200); // 200ms cooldown
 
-    // Send scroll position to other party (throttled for performance)
-    sendScrollPositionThrottled(scrollTop, scrollLeft);
+    // Send scroll position
+    sendScrollPosition(scrollTop, scrollLeft);
 
-    // Update last scroll position
+    // Update last position
     lastScrollPositionRef.current = { scrollTop, scrollLeft };
     setLastScrollPosition({ scrollTop, scrollLeft });
-  }, [sendScrollPositionThrottled, log]);
+  }, [sendScrollPosition]);
 
   // Handle scroll timeout (when user stops scrolling)
   const handleScrollEnd = useCallback(() => {

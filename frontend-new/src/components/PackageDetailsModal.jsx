@@ -139,7 +139,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
   const lastBoundaryRef = useRef(null);
 
   // Use scroll sync hook for package details (enabled only when modal is open)
-  const { scrollRef, isActiveController } = useUnifiedScrollSync(userType, open, 'details');
+  const { scrollRef, isActiveController } = useCoBrowseScrollSync(userType, open, 'details');
 
   // Use package details co-browsing hook
   const {
@@ -212,10 +212,18 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     }
   }, [incomingModalOpen, userType]);
 
+  // Track if close was initiated by incoming signal
+  const closeFromSignalRef = React.useRef(false);
+
   useEffect(() => {
     if (incomingModalClose) {
       console.log(`📦 [${userType}] Received modal close signal`);
+      closeFromSignalRef.current = true; // Mark that we're closing due to signal
       onClose();
+      // Reset after a short delay
+      setTimeout(() => {
+        closeFromSignalRef.current = false;
+      }, 100);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingModalClose, onClose]);
@@ -381,7 +389,16 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
   };
 
   const handleCloseModal = () => {
-    sendModalClose();
+    console.log(`[${userType}] handleCloseModal called, closeFromSignal:`, closeFromSignalRef.current);
+    
+    // Only send close signal if this close wasn't triggered by an incoming signal
+    if (!closeFromSignalRef.current) {
+      console.log(`[${userType}] Sending modal close signal`);
+      sendModalClose();
+    } else {
+      console.log(`[${userType}] Skip sending close signal - closed due to incoming signal`);
+    }
+
     onClose();
   };
 

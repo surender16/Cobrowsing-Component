@@ -835,9 +835,11 @@ const CustomerConversationWrapper = ({
 
 
     const sendComparisonAction = (action) => {
+        console.log("🎭 Customer sending comparison action:", action);
         const session = openTokSessionSingleton.getSession();
+        console.log("🎭 Customer comparison action session:", session);
         if (!session) return;
-
+console.log("🎭 Customer comparison action session available, sending signal");
         openTokSessionSingleton.sendSignal(
             {
                 type: "comparison-action",

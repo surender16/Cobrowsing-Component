@@ -104,8 +104,10 @@ const TourComparisonModal = ({
   const handleCloseComparison = () => {
     console.log(`🎭 [${userType}] Sending close comparison signal`);
     onClose();
+    console.log("sendComparisonAction ->", sendComparisonAction)
     if (sendComparisonAction) {
       const ids = compareList.map(pkg => pkg.id);
+      console.log("working::->",ids)
       sendComparisonAction('close-comparison', ids);
     }
   };

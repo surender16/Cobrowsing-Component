@@ -25,7 +25,7 @@ import {
   CompareArrows as CompareIcon,
   Compare as CompareActiveIcon,
 } from "@mui/icons-material";
-import { useUnifiedScrollSync } from "../hooks/useUnifiedScrollSync";
+import { useCoBrowseScrollSync } from "../hooks/useCoBrowseScrollSync";
 import { samplePackageData } from "../data/samplePackageData";
 import PackageDetailsModal from "./PackageDetailsModal";
 
@@ -63,6 +63,7 @@ const AgentCatalog = ({
   isInComparison = () => false,
   isComparisonFull = () => false,
   onComparePackages = () => { },
+  sendComparisonAction = null,
 }) => {
   // Filter states
   const [priceRange, setPriceRange] = useState([500, 3000]);
@@ -76,16 +77,22 @@ const AgentCatalog = ({
   const [selectedPackage, setSelectedPackage] = useState(null);
 
   // Co-browse scroll sync hook
-  const { scrollRef, isActiveController } = useUnifiedScrollSync('agent', true, 'catalog');
+  const { scrollRef, isActiveController } = useCoBrowseScrollSync('agent', true, 'catalog');
 
-  // Effect to handle opening modal from customer signal (handled by parent)
+  // Effect to handle opening/closing modal from customer signal (handled by parent)
   useEffect(() => {
-    if (packageDetailsToOpen) {
+    if (packageDetailsToOpen === null && modalOpen) {
+      // Incoming close signal
+      console.log(`[Agent Catalog] Closing modal from parent signal`);
+      setModalOpen(false);
+      setSelectedPackage(null);
+    } else if (packageDetailsToOpen) {
+      // Incoming open signal
       console.log(`📦 [agent] Opening modal from parent signal with package:`, packageDetailsToOpen.id);
       setSelectedPackage(packageDetailsToOpen);
       setModalOpen(true);
     }
-  }, [packageDetailsToOpen]);
+  }, [packageDetailsToOpen, modalOpen]);
 
   // Filter packages based on price range, holiday types, and regions
   useEffect(() => {
@@ -126,26 +133,29 @@ const AgentCatalog = ({
     setModalOpen(true);
 
     // Send signal to customer to open the same modal using parent's signal function
-    // Only send signal if not opened via signal from customer
-    if (packageDetailsToOpen !== pkg && sendPackageDetailsAction) {
+    // Send signal for any agent-initiated opens, let receiver handle duplicates
+    if (sendPackageDetailsAction) {
+      // Always send open signal to ensure both sides stay in sync
       console.log("[Agent Catalog] Sending signal to customer to open package details");
       sendPackageDetailsAction('agent-opened-package-details', pkg);
     } else {
-      console.log("[Agent Catalog] Not sending signal - opened via customer signal or no signal function");
+      console.log("[Agent Catalog] Not sending signal - no signal function provided");
     }
   };
 
   const handleCloseModal = () => {
+    console.log("[Agent Catalog] Closing modal");
     setModalOpen(false);
     setSelectedPackage(null);
 
     // Send signal to customer to close the same modal using parent's signal function
-    // Only send signal if not closed via signal from customer
-    if (packageDetailsToOpen !== null && sendPackageDetailsAction) {
-      console.log("[Agent Catalog] Sending signal to customer to close package details");
+    // Send signal on any close by agent - the receiver will handle deduplication
+    if (sendPackageDetailsAction) {
+      // Send close signal regardless of incoming state to ensure both sides stay in sync
+      console.log("[Agent Catalog] Sending signal to close package details");
       sendPackageDetailsAction('close-package-details');
     } else {
-      console.log("[Agent Catalog] Not sending signal - closed via customer signal or no signal function");
+      console.log("[Agent Catalog] Not sending signal - no signal function provided");
     }
   };
 
@@ -855,6 +865,16 @@ const AgentCatalog = ({
               onClick={() => {
                 console.log("[Agent Catalog] Compare Packages button clicked");
                 console.log("[Agent Catalog] compareList:", compareList);
+                try {
+                  if (sendComparisonAction && Array.isArray(compareList) && compareList.length > 0) {
+                    const ids = compareList.map((p) => (p && p.id ? p.id : p));
+                    console.log("[Agent Catalog] Sending comparison open signal with ids:", ids);
+                    sendComparisonAction('agent-opened-comparison', ids);
+                  }
+                } catch (err) {
+                  console.warn('[Agent Catalog] Error sending comparison signal', err);
+                }
+
                 onComparePackages();
               }}
               sx={{

@@ -119,7 +119,7 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
   const [sharingStatus, setSharingStatus] = useState('');
   const [packageDetailsToOpen, setPackageDetailsToOpen] = useState(null);
   // Legacy state (no longer used)
-  const [comparePackages] = useState([]);
+  // Legacy state (no longer used) - removed
 
   const fileInputRef = useRef(null);
   const publisherRef = useRef(null);
@@ -1265,20 +1265,80 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
     const packageId = packageData?.id || null;
     syncManager.detailAction('packageDetails', { packageDetails: { open, packageId, ts: Date.now() } });
     console.log('[sync] detailAction packageDetails', { open, packageId });
+
+    // Also send OpenTok signal so the remote participant (customer) receives the action
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (session) {
+      const payload = {
+        action,
+        userType: 'agent',
+        timestamp: new Date().toISOString(),
+      };
+
+      if (packageId) payload.packageId = packageId;
+
+      openTokSessionSingleton.sendSignal(
+        {
+          type: 'package-details-modal-action',
+          data: JSON.stringify(payload),
+        },
+        (err) => {
+          if (err) console.error('Failed to send package-details-modal-action signal (agent):', err);
+        }
+      );
+    }
   };
 
   const sendComparisonAction = (action, packageIds) => {
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+
     if (action === 'agent-opened-comparison') {
       const ids = packageIds && packageIds.length ? packageIds : compareList.map(p => p.id);
       syncManager.detailAction('comparison', { comparison: { open: true, packageIds: ids, ts: Date.now() } });
       console.log('[sync] comparison open broadcast', ids);
+
+      if (session) {
+        openTokSessionSingleton.sendSignal(
+          {
+            type: 'comparison-action',
+            data: JSON.stringify({ action: 'agent-opened-comparison', userType: 'agent', packageIds: ids, timestamp: Date.now() }),
+          },
+          (err) => {
+            if (err) console.error('Failed to send comparison-action signal (open):', err);
+          }
+        );
+      }
     } else if (action === 'close-comparison') {
       syncManager.detailAction('comparison', { comparison: { open: false, ts: Date.now() } });
       console.log('[sync] comparison close broadcast');
+
+      if (session) {
+        openTokSessionSingleton.sendSignal(
+          {
+            type: 'comparison-action',
+            data: JSON.stringify({ action: 'close-comparison', userType: 'agent', timestamp: Date.now() }),
+          },
+          (err) => {
+            if (err) console.error('Failed to send comparison-action signal (close):', err);
+          }
+        );
+      }
     } else if (action === 'clear-comparison') {
       clearComparison();
       syncManager.detailAction('comparison', { comparison: { open: true, packageIds: [], ts: Date.now() } });
       console.log('[sync] comparison cleared');
+
+      if (session) {
+        openTokSessionSingleton.sendSignal(
+          {
+            type: 'comparison-action',
+            data: JSON.stringify({ action: 'clear-comparison', userType: 'agent', timestamp: Date.now() }),
+          },
+          (err) => {
+            if (err) console.error('Failed to send comparison-action signal (clear):', err);
+          }
+        );
+      }
     }
   };
 
@@ -1360,7 +1420,7 @@ useLayoutEffect(() => {
   };
 }, []);
 
-  console.log("📦 comparePackages:", comparePackages);
+  // Removed legacy comparePackages logging - using compareList from useComparePackages
   return (
     <Paper
       elevation={3}
