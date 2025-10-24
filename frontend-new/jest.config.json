@@ -1,0 +1,7 @@
+{
+  "testEnvironment": "node",
+  "roots": ["<rootDir>/__tests__"],
+  "moduleFileExtensions": ["js","jsx"],
+  "transform": {},
+  "verbose": true
+}
