@@ -204,11 +204,31 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
 
   const ensureMediaAccess = async () => {
     if (!ENABLE_AGENT_VIDEO && !ENABLE_AGENT_AUDIO) return true;
-    await navigator.mediaDevices.getUserMedia({
-      video: ENABLE_AGENT_VIDEO,
-      audio: ENABLE_AGENT_AUDIO,
-    });
-    return true;
+    
+    try {
+      // Check if we already have the required permissions
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const hasVideoPermission = devices.some(device => device.kind === 'videoinput' && device.label);
+      const hasAudioPermission = devices.some(device => device.kind === 'audioinput' && device.label);
+      
+      // Request permissions only if needed
+      if ((ENABLE_AGENT_VIDEO && !hasVideoPermission) || (ENABLE_AGENT_AUDIO && !hasAudioPermission)) {
+        await navigator.mediaDevices.getUserMedia({
+          video: ENABLE_AGENT_VIDEO && !hasVideoPermission,
+          audio: ENABLE_AGENT_AUDIO && !hasAudioPermission,
+        });
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('🎥 Failed to get media access:', error);
+      if (error.name === 'NotAllowedError') {
+        alert('Please allow camera/microphone access to use video chat.');
+      } else if (error.name === 'NotFoundError') {
+        alert('No camera/microphone found. Please check your device settings.');
+      }
+      return false;
+    }
   };
 
   // Initialize session on mount
@@ -385,7 +405,7 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
                   } else {
                     console.error("📦 Agent could not find package data for ID:", data.packageId);
                   }
-                } else if (data.action === 'close-package-details') {
+                } else if (data.action === 'close-package-details' || data.action === 'customer-closed-package-details') {
                   console.log("📦 Customer closed package details - closing agent modal");
                   setPackageDetailsToOpen(null);
                 }
@@ -507,37 +527,93 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
               video: ENABLE_AGENT_VIDEO && videoInput,
               audio: ENABLE_AGENT_AUDIO && audioInput,
               showControls: false, // Hide default OpenTok controls
+              videoContentHint: 'motion', // Optimize for movement
+              enableStereo: ENABLE_AGENT_AUDIO, // Better audio quality if enabled
+              enableDtx: false, // Disable discontinuous transmission for clearer audio
+              maxResolution: { width: 1280, height: 720 }, // Limit resolution for better performance
+              resolution: '640x480', // Default resolution
+              frameRate: 30, // Standard frame rate
+              insertDefaultUI: true, // Use default OpenTok UI elements
+              style: { // Set standard styles
+                buttonDisplayMode: 'off',
+                nameDisplayMode: 'on',
+              }
             };
 
-            const webcamPublisher = OT.initPublisher(
-              publisherContainerRef.current,
-              publisherOptions,
-              (pubErr) => {
-                if (pubErr) {
-                  console.error("Publisher init error:", pubErr);
-                } else {
+            try {
+              const webcamPublisher = OT.initPublisher(
+                publisherContainerRef.current,
+                publisherOptions,
+                async (pubErr) => {
+                  if (pubErr) {
+                    console.error("🎥 Publisher init error:", pubErr);
+                    if (pubErr.name === 'OT_USER_MEDIA_ACCESS_DENIED') {
+                      alert('Please allow camera/microphone access to use video chat.');
+                    }
+                    return;
+                  }
+
                   webcamPublisherRef.current = webcamPublisher;
                   publisherRef.current = webcamPublisher;
 
-                  session.publish(webcamPublisher, (pubErr2) => {
-                    if (pubErr2) {
-                      console.error("Publish error:", pubErr2);
-                    }
-                  });
+                  try {
+                    await new Promise((resolve, reject) => {
+                      session.publish(webcamPublisher, (pubErr2) => {
+                        if (pubErr2) {
+                          console.error("🎥 Publish error:", pubErr2);
+                          reject(pubErr2);
+                        } else {
+                          resolve();
+                        }
+                      });
+                    });
 
-                  // Send call acceptance signal
-                  openTokSessionSingleton.sendSignal(
-                    {
-                      type: "callAccepted",
-                      data: "Agent accepted the call",
-                    },
-                    (err) => {
-                      if (err) console.error("Signal error:", err);
+                    // Only send acceptance after successful publish
+                    await new Promise((resolve, reject) => {
+                      openTokSessionSingleton.sendSignal(
+                        {
+                          type: "callAccepted",
+                          data: "Agent accepted the call",
+                        },
+                        (err) => {
+                          if (err) {
+                            console.error("🎥 Signal error:", err);
+                            reject(err);
+                          } else {
+                            resolve();
+                          }
+                        }
+                      );
+                    });
+
+                    console.log("🎥 Successfully initialized and published webcam");
+                  } catch (error) {
+                    console.error("🎥 Failed during publish or signal:", error);
+                    if (webcamPublisherRef.current) {
+                      webcamPublisherRef.current.destroy();
+                      webcamPublisherRef.current = null;
                     }
-                  );
+                  }
                 }
-              }
-            );
+              );
+
+              // Add error event listener
+              webcamPublisher.on('streamDestroyed', (event) => {
+                console.log("🎥 Stream was destroyed:", event.reason);
+              });
+
+              webcamPublisher.on('mediaStopped', () => {
+                console.log("🎥 Media was stopped");
+              });
+
+              webcamPublisher.on('accessDenied', () => {
+                console.error("🎥 Media access was denied");
+                alert('Camera/microphone access was denied. Please check your browser settings.');
+              });
+
+            } catch (error) {
+              console.error("🎥 Critical error during publisher initialization:", error);
+            }
 
             webcamPublisher.on("streamCreated", (e) => {
               setShowCustomerLeftPopup(false);
@@ -704,46 +780,101 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
     }
   };
 
-  const initWebcamPublisher = (callback) => {
-    if (!openTokSessionSingleton.isSessionAvailable() || !publisherContainerRef.current) return;
-
-    const publisherOptions = {
-      insertMode: "append",
-      width: "100%",
-      height: "100%",
-      name: "Agent",
-      videoSource: ENABLE_AGENT_VIDEO && hasVideoInput ? undefined : null,
-      audioSource: ENABLE_AGENT_AUDIO && hasAudioInput ? undefined : null,
-      video: ENABLE_AGENT_VIDEO && hasVideoInput,
-      audio: ENABLE_AGENT_AUDIO && hasAudioInput,
-      showControls: false, // Hide default OpenTok controls
-    };
-
-    const newWebcamPublisher = OT.initPublisher(
-      publisherContainerRef.current,
-      publisherOptions,
-      (err) => {
-        if (err) {
-          console.error("Webcam publisher init error:", err);
-          if (callback) callback(err);
-          return;
-        }
-
-        webcamPublisherRef.current = newWebcamPublisher;
-        publisherRef.current = newWebcamPublisher;
-
-        const session = openTokSessionSingleton.getSession();
-        session.publish(newWebcamPublisher, (pubErr) => {
-          if (pubErr) {
-            console.error("Publish webcam error:", pubErr);
+    const initWebcamPublisher = async () => {
+      return new Promise(async (resolve, reject) => {
+        try {
+          if (!openTokSessionSingleton.isSessionAvailable()) {
+            throw new Error('OpenTok session not available');
           }
-          if (callback) callback(pubErr);
-        });
-      }
-    );
-  };
+          
+          if (!publisherContainerRef.current) {
+            throw new Error('Publisher container not found');
+          }
 
-  const toggleScreenShare = async () => {
+          // Check media access first
+          const mediaAccess = await ensureMediaAccess();
+          if (!mediaAccess) {
+            throw new Error('Failed to get media access');
+          }
+
+          const publisherOptions = {
+            insertMode: "append",
+            width: "100%",
+            height: "100%",
+            name: "Agent",
+            videoSource: ENABLE_AGENT_VIDEO && hasVideoInput ? undefined : null,
+            audioSource: ENABLE_AGENT_AUDIO && hasAudioInput ? undefined : null,
+            video: ENABLE_AGENT_VIDEO && hasVideoInput,
+            audio: ENABLE_AGENT_AUDIO && hasAudioInput,
+            showControls: false,
+            videoContentHint: 'motion',
+            enableStereo: ENABLE_AGENT_AUDIO,
+            enableDtx: false,
+            maxResolution: { width: 1280, height: 720 },
+            resolution: '640x480',
+            frameRate: 30,
+            insertDefaultUI: true,
+            style: {
+              buttonDisplayMode: 'off',
+              nameDisplayMode: 'on',
+            }
+          };
+
+          const newWebcamPublisher = OT.initPublisher(
+            publisherContainerRef.current,
+            publisherOptions,
+            async (err) => {
+              if (err) {
+                console.error("🎥 Webcam publisher init error:", err);
+                reject(err);
+                return;
+              }
+
+              webcamPublisherRef.current = newWebcamPublisher;
+              publisherRef.current = newWebcamPublisher;
+
+              const session = openTokSessionSingleton.getSession();
+              try {
+                await new Promise((innerResolve, innerReject) => {
+                  session.publish(newWebcamPublisher, (pubErr) => {
+                    if (pubErr) {
+                      console.error("🎥 Publish webcam error:", pubErr);
+                      innerReject(pubErr);
+                    } else {
+                      innerResolve();
+                    }
+                  });
+                });
+
+                console.log("🎥 Successfully initialized and published new webcam");
+                resolve();
+              } catch (pubError) {
+                console.error("🎥 Failed to publish webcam:", pubError);
+                reject(pubError);
+              }
+            }
+          );
+
+          // Add event listeners for monitoring
+          newWebcamPublisher.on('streamDestroyed', (event) => {
+            console.log("🎥 New webcam stream was destroyed:", event.reason);
+          });
+
+          newWebcamPublisher.on('mediaStopped', () => {
+            console.log("🎥 New webcam media was stopped");
+          });
+
+          newWebcamPublisher.on('accessDenied', () => {
+            console.error("🎥 New webcam access was denied");
+            reject(new Error('Camera/microphone access was denied'));
+          });
+
+        } catch (error) {
+          console.error("🎥 Critical error during new webcam initialization:", error);
+          reject(error);
+        }
+      });
+    };  const toggleScreenShare = async () => {
     const session = openTokSessionSingleton.getSession();
     if (!session) return;
 
@@ -756,12 +887,16 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
       }
 
       // Re-init webcam publisher
-      initWebcamPublisher((err) => {
-        if (!err) {
+      initWebcamPublisher()
+        .then(() => {
           setIsScreenSharing(false);
           setLocalVideoOn(true);
-        }
-      });
+        })
+        .catch((err) => {
+          console.error("🎥 Failed to reinitialize webcam after screen share:", err);
+          setIsScreenSharing(false);
+          setLocalVideoOn(false);
+        });
     } else {
       // Start screen sharing
 
@@ -804,12 +939,16 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
             }
 
             // Re-init webcam publisher
-            initWebcamPublisher((err) => {
-              if (!err) {
+            initWebcamPublisher()
+              .then(() => {
                 setIsScreenSharing(false);
                 setLocalVideoOn(true);
-              }
-            });
+              })
+              .catch((err) => {
+                console.error("🎥 Failed to reinitialize webcam after media stop:", err);
+                setIsScreenSharing(false);
+                setLocalVideoOn(false);
+              });
           });
 
           // Publish screen share

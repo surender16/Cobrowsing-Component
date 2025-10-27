@@ -12,7 +12,9 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
   const { passive = false } = options;
   const [isActiveController, setIsActiveController] = useState(false);
   const [lastScrollPosition, setLastScrollPosition] = useState({ scrollTop: 0, scrollLeft: 0 });
-
+  const [syncStatus, setSyncStatus] = useState('idle'); // 'idle', 'syncing', 'error'
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [syncError, setSyncError] = useState(null);
 
   // Refs for tracking scroll state
   const scrollRef = useRef(null);
@@ -24,6 +26,11 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
   const throttleTimeoutRef = useRef(null);
   const scrollDelayTimeoutRef = useRef(null);
   
+  // New refs for enhanced sync stability
+  const lastSuccessfulSyncRef = useRef(Date.now());
+  const syncAttemptCountRef = useRef(0);
+  const syncIntervalRef = useRef(null);
+
   // Enhanced loop prevention
   const lastReceivedScrollRef = useRef({ scrollTop: 0, scrollLeft: 0, timestamp: 0 });
   const scrollCooldownRef = useRef(false);
@@ -100,46 +107,88 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
           }
         });
       }
-    }, 150); // Increased to 150ms to reduce signal frequency and prevent loops
+    }, 50); // Reduced to 50ms for smoother, more responsive sync (20fps)
   }, [userType, enabled, log, getSignalType, containerType]);
 
-  // Send scroll position to other party (immediate, for important updates)
+  // Send scroll position with enhanced reliability and feedback
   const sendScrollPosition = useCallback((scrollTop, scrollLeft) => {
     const session = openTokSessionSingleton.getSession();
-    if (!session || !enabled) return;
+    if (!session || !enabled) {
+      setSyncError('No active session or sync disabled');
+      return;
+    }
+
+    // Update UI state
+    setSyncStatus('syncing');
+    setSyncProgress(25);
 
     const scrollData = {
       scrollTop,
       scrollLeft,
       userType,
       containerType,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      syncId: Math.random().toString(36).substring(7), // Unique sync ID for tracking
+      attempt: syncAttemptCountRef.current + 1
     };
 
     const primaryType = getSignalType();
     const payload = JSON.stringify(scrollData);
 
-    // Send to primary channel
-    openTokSessionSingleton.sendSignal({ type: primaryType, data: payload }, (err) => {
+    // Track sync attempt
+    syncAttemptCountRef.current++;
+
+    const handleSignalResult = (err, channel) => {
       if (err) {
-        log('Failed to send scroll signal (primary):', err);
+        log(`❌ Failed to send scroll signal (${channel}):`, err);
+        setSyncStatus('error');
+        setSyncError(`Failed to send ${channel} signal: ${err.message}`);
+        
+        // Retry logic for failed signals
+        if (syncAttemptCountRef.current < 3) {
+          setTimeout(() => sendScrollPosition(scrollTop, scrollLeft), 100 * Math.pow(2, syncAttemptCountRef.current));
+        }
+      } else {
+        log(`✅ Successfully sent scroll signal (${channel})`);
+        setSyncProgress(prev => Math.min(prev + 25, 100));
+        
+        // Reset error state on success
+        if (channel === 'primary') {
+          setSyncError(null);
+          lastSuccessfulSyncRef.current = Date.now();
+        }
       }
-    });
+    };
+
+    // Send to primary channel
+    openTokSessionSingleton.sendSignal({ type: primaryType, data: payload }, 
+      (err) => handleSignalResult(err, 'primary')
+    );
 
     // Also send to generic channel for compatibility
     if (primaryType !== 'cobrowse-scroll-sync') {
-      openTokSessionSingleton.sendSignal({ type: 'cobrowse-scroll-sync', data: payload }, (err) => {
-        if (err) {
-          log('Failed to send scroll signal (fallback):', err);
+      openTokSessionSingleton.sendSignal({ type: 'cobrowse-scroll-sync', data: payload },
+        (err) => handleSignalResult(err, 'fallback')
+      );
+    }
+
+    // Set up health check interval
+    if (!syncIntervalRef.current) {
+      syncIntervalRef.current = setInterval(() => {
+        const timeSinceLastSync = Date.now() - lastSuccessfulSyncRef.current;
+        if (timeSinceLastSync > 5000) { // 5 seconds without successful sync
+          setSyncStatus('error');
+          setSyncError('Sync connection unstable');
+          log('⚠️ Sync connection unstable - last successful sync was ' + timeSinceLastSync + 'ms ago');
         }
-      });
+      }, 5000);
     }
   }, [userType, enabled, log, getSignalType, containerType]);
 
   // Apply received scroll position
   const applyScrollPosition = useCallback((scrollTop, scrollLeft) => {
     if (!scrollRef.current) return;
-    
+
     incomingScrollRef.current = true;
     scrollAnimationRef.current = true;
 
@@ -154,38 +203,78 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
     setLastScrollPosition(newPosition);
     lastScrollPositionRef.current = newPosition;
 
-    // Reset flags after animation
+    // Reset flags after animation - faster reset for smoother sync
     setTimeout(() => {
       incomingScrollRef.current = false;
       scrollAnimationRef.current = false;
-    }, 300);
+    }, 50); // Reduced to 50ms for very fast sync
   }, [log]);
 
-  // Handle incoming scroll signals
+  // Handle incoming scroll signals with enhanced error handling and retry logic
   const handleScrollSignal = useCallback((event) => {
     if (!enabled) return;
 
     try {
       const data = JSON.parse(event.data);
-      
+
       // Only process signals for matching container type
       if (data.containerType !== containerType) return;
-      
+
       // Only process signals from opposite user type
       if (data.userType === userType) return;
 
-      // Apply the scroll position
-      applyScrollPosition(data.scrollTop, data.scrollLeft);
+      // Update sync status
+      setSyncStatus('syncing');
+      setSyncProgress(50); // Initial progress
+
+      // Verify data integrity
+      if (typeof data.scrollTop !== 'number' || typeof data.scrollLeft !== 'number') {
+        throw new Error('Invalid scroll position data');
+      }
+
+      // Apply the scroll position with retry logic
+      const maxRetries = 3;
+      let retryCount = 0;
+
+      const attemptSync = () => {
+        try {
+          applyScrollPosition(data.scrollTop, data.scrollLeft);
+          
+          // Update success metrics
+          lastSuccessfulSyncRef.current = Date.now();
+          syncAttemptCountRef.current = 0;
+          setSyncStatus('idle');
+          setSyncProgress(100);
+          setSyncError(null);
+          
+          log(`✅ Scroll sync successful for ${containerType}`);
+        } catch (syncErr) {
+          retryCount++;
+          if (retryCount < maxRetries) {
+            log(`⚠️ Retry ${retryCount}/${maxRetries} for ${containerType}`);
+            setTimeout(attemptSync, 100 * retryCount); // Exponential backoff
+          } else {
+            setSyncStatus('error');
+            setSyncError(`Failed to sync after ${maxRetries} attempts`);
+            log(`❌ Scroll sync failed for ${containerType} after ${maxRetries} attempts`);
+          }
+        }
+      };
+
+      attemptSync();
 
     } catch (err) {
       console.error('Failed to parse scroll signal:', err);
+      setSyncStatus('error');
+      setSyncError(err.message);
+      setSyncProgress(0);
     }
-  }, [enabled, containerType, userType, applyScrollPosition]);
+  }, [enabled, containerType, userType, applyScrollPosition, log]);
 
   // Handle scroll events from the local container
   const handleScroll = useCallback((event) => {
-    // Ignore programmatic scrolls
-    if (incomingScrollRef.current || scrollAnimationRef.current) {
+    // Ignore programmatic scrolls (only if actively receiving incoming scroll)
+    if (incomingScrollRef.current) {
       return;
     }
 
@@ -195,22 +284,15 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
     isActiveControllerRef.current = true;
     setIsActiveController(true);
 
-    // Set cooldown to prevent immediate feedback
-    scrollCooldownRef.current = true;
-    if (scrollCooldownTimeoutRef.current) {
-      clearTimeout(scrollCooldownTimeoutRef.current);
-    }
-    scrollCooldownTimeoutRef.current = setTimeout(() => {
-      scrollCooldownRef.current = false;
-    }, 200); // 200ms cooldown
+    // Don't set cooldown - let it throttle naturally through sendScrollPositionThrottled
 
-    // Send scroll position
-    sendScrollPosition(scrollTop, scrollLeft);
+    // Send scroll position using throttled version for smoother performance
+    sendScrollPositionThrottled(scrollTop, scrollLeft);
 
     // Update last position
     lastScrollPositionRef.current = { scrollTop, scrollLeft };
     setLastScrollPosition({ scrollTop, scrollLeft });
-  }, [sendScrollPosition]);
+  }, [sendScrollPositionThrottled]);
 
   // Handle scroll timeout (when user stops scrolling)
   const handleScrollEnd = useCallback(() => {
@@ -221,7 +303,7 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
         setIsActiveController(false);
         log('Released active control');
       }
-    }, 1500); // Reduced to 1500ms for faster control switching
+    }, 500); // Reduced to 500ms for faster control switching
   }, [log]);
 
   // Set up scroll event listener on the scroll container
@@ -246,7 +328,7 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
       // Set new timeout for scroll end
       scrollTimeoutRef.current = setTimeout(() => {
         handleScrollEnd();
-      }, 100); // Reduced to 100ms for faster control switching
+      }, 150); // Reduced to 150ms for faster scroll end detection
     };
 
     scrollContainer.addEventListener('scroll', handleScrollEvent, { passive: true });
@@ -315,23 +397,52 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
     };
   }, [handleScrollSignal, enabled, log, getSignalType]);
 
-  // Cleanup on unmount
+  // Enhanced cleanup and monitoring
   useEffect(() => {
+    // Set up connection monitoring
+    const healthCheck = setInterval(() => {
+      const session = openTokSessionSingleton.getSession();
+      if (!session) {
+        setSyncStatus('error');
+        setSyncError('Session disconnected');
+        log('❌ No active session');
+      } else if (syncStatus === 'error' && session) {
+        // Try to recover from error state
+        setSyncStatus('idle');
+        setSyncError(null);
+        log('🔄 Recovered from error state');
+      }
+    }, 2000);
+
+    // Monitor sync performance
+    const performanceCheck = setInterval(() => {
+      if (syncAttemptCountRef.current > 10) {
+        log('⚠️ High number of sync attempts detected');
+        syncAttemptCountRef.current = 0; // Reset counter
+      }
+    }, 10000);
+
+    // Cleanup function
     return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-      if (throttleTimeoutRef.current) {
-        clearTimeout(throttleTimeoutRef.current);
-      }
-      if (scrollDelayTimeoutRef.current) {
-        clearTimeout(scrollDelayTimeoutRef.current);
-      }
-      if (scrollCooldownTimeoutRef.current) {
-        clearTimeout(scrollCooldownTimeoutRef.current);
-      }
+      // Clear all timeouts and intervals
+      [
+        scrollTimeoutRef.current,
+        throttleTimeoutRef.current,
+        scrollDelayTimeoutRef.current,
+        scrollCooldownTimeoutRef.current,
+        syncIntervalRef.current,
+        healthCheck,
+        performanceCheck
+      ].forEach(timer => timer && clearTimeout(timer));
+
+      // Reset states
+      setSyncStatus('idle');
+      setSyncProgress(0);
+      setSyncError(null);
+      syncAttemptCountRef.current = 0;
+      log('🧹 Cleanup complete');
     };
-  }, []);
+  }, [log]);
 
   return {
     scrollRef,
@@ -342,7 +453,11 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
     applyScrollPosition,
     isIncomingScroll: incomingScrollRef.current,
     isScrollAnimating: scrollAnimationRef.current,
-    // Additional utility methods
+    // Sync status information
+    syncStatus,
+    syncProgress,
+    syncError,
+    // Enhanced utility methods
     syncToPosition: (scrollTop, scrollLeft) => {
       if (!incomingScrollRef.current) {
         sendScrollPosition(scrollTop, scrollLeft);
@@ -356,6 +471,14 @@ export const useCoBrowseScrollSync = (userType = 'agent', enabled = true, contai
         };
       }
       return { scrollTop: 0, scrollLeft: 0 };
+    },
+    // Reset sync state
+    resetSync: () => {
+      setSyncStatus('idle');
+      setSyncProgress(0);
+      setSyncError(null);
+      syncAttemptCountRef.current = 0;
+      lastSuccessfulSyncRef.current = Date.now();
     }
   };
 }; 

@@ -47,38 +47,40 @@ import {
   Favorite as HeartIcon,
   Share as ShareIcon,
 } from '@mui/icons-material';
-import { useUnifiedScrollSync } from '../../hooks/useUnifiedScrollSync';
+import { useCoBrowseScrollSync } from '../../hooks/useCoBrowseScrollSync';
 // Removed direct OpenTok session usage (handled by syncManager elsewhere)
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
 });
 
-const TourComparisonModal = ({
-  open,
-  onClose,
-  compareList = [],
-  // onRemoveFromCompare,
-  onClearComparison,
-  getBestValue,
-  userType = 'agent',
-  sendComparisonAction = null,
-}) => {
+const TourComparisonModal = ({ open, onClose, compareList, onClearComparison, getBestValue, userType = 'agent', sendComparisonAction }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const bestValuePackage = getBestValue();
 
-  // Use scroll sync hook for comparison modal (enabled only when modal is open)
-  const { scrollRef, isActiveController } = useUnifiedScrollSync(userType, open, 'comparison');
+  // Enhanced scroll sync with optimized settings
+  const {
+    scrollRef,
+    isActiveController,
+    syncToPosition,
+    isIncomingScroll,
+    isScrollAnimating,
+    getScrollPosition
+  } = useCoBrowseScrollSync(userType, open, 'comparison', {
+    passive: false,  // non-passive for better control
+    throttleDelay: 16, // ~60fps for smoother sync
+    enforceSync: true // ensure strict synchronization
+  });
 
-  // Debug: Log scroll sync status
+  // The useCoBrowseScrollSync hook handles all scroll syncing
+  // No additional custom scroll handling needed
+
+  // Reset scroll position when modal opens
   useEffect(() => {
-    if (open) {
-      console.log(`🎭 [${userType}] TourComparisonModal opened - scroll sync should be active`);
-      console.log(`🎭 [${userType}] scrollRef.current:`, scrollRef.current);
-      console.log(`🎭 [${userType}] isActiveController:`, isActiveController);
+    if (open && scrollRef.current) {
+      scrollRef.current.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     }
-  }, [open, userType, isActiveController, scrollRef]);
+  }, [open]);
 
   // Note: Cursor pointer functionality moved to GlobalCursorPointer component
 
@@ -94,8 +96,9 @@ const TourComparisonModal = ({
     console.log(`🎭 [${userType}] Sending clear comparison signal`);
 
     if (sendComparisonAction) {
-      const ids = compareList.map(pkg => pkg.id);
-      sendComparisonAction('clear-comparison', ids);
+      console.log(`🎭 [${userType}] Sending clear-comparison signal via sendComparisonAction`);
+      // Don't pass ids for clear action, just the action
+      sendComparisonAction('clear-comparison');
     }
 
     onClearComparison();
@@ -103,13 +106,15 @@ const TourComparisonModal = ({
 
   const handleCloseComparison = () => {
     console.log(`🎭 [${userType}] Sending close comparison signal`);
-    onClose();
-    console.log("sendComparisonAction ->", sendComparisonAction)
+    
+    // Send signal before closing
     if (sendComparisonAction) {
       const ids = compareList.map(pkg => pkg.id);
-      console.log("working::->",ids)
+      console.log(`🎭 [${userType}] Sending close-comparison signal with IDs:`, ids);
       sendComparisonAction('close-comparison', ids);
     }
+    
+    onClose();
   };
 
   const formatHighlights = (description) => {
@@ -228,6 +233,7 @@ const TourComparisonModal = ({
   };
 
   const bestPricedPackage = getBestPricedPackage();
+  const bestValuePackage = typeof getBestValue === 'function' ? getBestValue() : null;
 
   // Helper function to calculate package discount percentage
   const getPackageDiscountPercentage = (pkg) => {
@@ -1189,18 +1195,28 @@ const TourComparisonModal = ({
     }
   };
 
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      fullScreen
-      TransitionComponent={Transition}
+  // Add sync status indicator in title
+  const renderSyncStatus = () => (
+    <Chip
+      label={isActiveController ? "CONTROLLING" : "SYNCED"}
+      size="small" 
+      color={isActiveController ? "warning" : "success"}
       sx={{
-        '& .MuiDialog-paper': {
-          bgcolor: 'background.default',
-        },
+        ml: 1,
+        fontSize: '0.65rem',
+        fontWeight: 'bold',
+        animation: isActiveController ? 'none' : 'pulse 2s infinite',
+        '@keyframes pulse': {
+          '0%, 100%': { opacity: 1 },
+          '50%': { opacity: 0.7 }
+        }
       }}
-    >
+    />
+  );
+
+  // Ensure table content scrolls properly
+  return (
+    <Dialog open={open} onClose={onClose} fullScreen TransitionComponent={Transition}>
       <DialogTitle
         sx={{
           bgcolor: 'primary.main',
@@ -1305,20 +1321,41 @@ const TourComparisonModal = ({
               // Add visual indicator when this side is actively controlling
               borderLeft: isActiveController ? '4px solid' : 'none',
               borderColor: 'success.main',
-              // Prevent scroll conflicts
+              // Enhanced scroll behavior and performance optimizations
               scrollBehavior: 'smooth',
+              WebkitOverflowScrolling: 'touch',
+              msOverflowStyle: '-ms-autohiding-scrollbar',
+              // Better scroll performance
+              willChange: 'scroll-position',
+              backfaceVisibility: 'hidden',
+              transform: 'translate3d(0,0,0)', // Hardware acceleration
+              // Improved touch behavior
+              touchAction: 'pan-y',
+              // Enhanced scrollbar styling
               '&::-webkit-scrollbar': {
                 width: '8px',
+                height: '8px',
               },
               '&::-webkit-scrollbar-track': {
                 background: '#f1f1f1',
+                borderRadius: '4px',
               },
               '&::-webkit-scrollbar-thumb': {
                 background: '#c1c1c1',
                 borderRadius: '4px',
+                transition: 'background-color 0.2s',
+                '&:hover': {
+                  background: '#a8a8a8',
+                },
               },
-              '&::-webkit-scrollbar-thumb:hover': {
-                background: '#a8a8a8',
+              // Improved content performance
+              '& > *': {
+                willChange: 'transform',
+              },
+              // Mobile optimizations
+              '@media (hover: none)': {
+                WebkitOverflowScrolling: 'touch',
+                overscrollBehavior: 'contain',
               },
             }}
           >
@@ -1460,4 +1497,4 @@ const TourComparisonModal = ({
   );
 };
 
-export default TourComparisonModal; 
+export default TourComparisonModal;

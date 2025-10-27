@@ -80,11 +80,15 @@ const PackageShareDialog = ({
     console.log("🎭 Opening comparison drawer with", compareList.length, "packages");
 
     // If customer has no packages in comparison but has shared packages, add them
-    if (compareList.length === 0 && sharedPackages.length > 0) {
-      console.log("🎭 Customer has no comparison packages but has shared packages, adding them");
-      sharedPackages.forEach(pkg => {
-        addToCompare(pkg);
-      });
+    const packagesToCompare = compareList.length > 0 ? compareList : sharedPackages;
+    const packageIds = packagesToCompare.map(p => p.id);
+    
+    console.log("🎭 Sending comparison open signal to agent with package IDs:", packageIds);
+
+    // Send signal to agent to sync comparison with action and package IDs
+    if (sendComparisonAction) {
+      console.log("🎭 Calling sendComparisonAction prop function with customer-opened-comparison action");
+      sendComparisonAction('customer-opened-comparison', packageIds);
     }
 
     openComparison();
@@ -93,6 +97,14 @@ const PackageShareDialog = ({
 
   const handleCloseComparison = () => {
     console.log("🎭 Closing comparison drawer");
+    
+    // Send signal to agent to close comparison
+    if (sendComparisonAction) {
+      console.log("🎭 Sending close comparison signal to agent");
+      const packageIds = compareList.map(p => p.id);
+      sendComparisonAction('close-comparison', packageIds);
+    }
+    
     closeComparison();
   };
 

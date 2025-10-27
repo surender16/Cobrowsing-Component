@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { packageDetailsCoBrowseSingleton } from '../services/PackageDetailsCoBrowseManager';
+import { openTokSessionSingleton } from '../services/OpenTokSessionManager';
 
 /**
  * Custom hook for package details co-browsing
@@ -266,8 +267,30 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
   const sendModalClose = useCallback(() => {
     if (!enabled || packageDetailsCoBrowseSingleton.isIncomingActionRef.current) return;
 
-    console.log(`📦 [${userType}] Sending modal close`);
+    console.log(`📦 [${userType}] Sending modal close signal`);
     packageDetailsCoBrowseSingleton.sendAction('modal-close', {}, userType);
+    
+    // Also send via OpenTok signal to ensure proper sync
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (session) {
+      openTokSessionSingleton.sendSignal(
+        {
+          type: 'package-details-modal-action',
+          data: JSON.stringify({
+            action: `${userType}-closed-package-details`,
+            userType,
+            timestamp: new Date().toISOString(),
+          }),
+        },
+        (err) => {
+          if (err) {
+            console.error('Failed to send modal close signal:', err);
+          } else {
+            console.log('✅ Successfully sent modal close signal');
+          }
+        }
+      );
+    }
   }, [enabled, userType]);
 
   const sendActivitiesModalOpen = useCallback(() => {

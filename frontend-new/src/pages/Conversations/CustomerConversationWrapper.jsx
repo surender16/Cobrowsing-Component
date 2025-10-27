@@ -360,7 +360,7 @@ const CustomerConversationWrapper = ({
                         } else {
                             console.error("📦 Customer could not find package data for ID:", data.packageId);
                         }
-                    } else if (data.action === 'close-package-details') {
+                    } else if (data.action === 'close-package-details' || data.action === 'agent-closed-package-details') {
                         console.log("📦 Agent closed package details - closing customer modal");
                         setPackageDetailsToOpen(null);
                     }
@@ -801,29 +801,54 @@ const CustomerConversationWrapper = ({
 
     // Signal sending functions for child components
 
-    // Send shared-comparison-open signal to agent
-    const sendSharedComparisonOpen = () => {
+    // Send shared-comparison-open signal to agent - now also handles all comparison actions
+    const sendSharedComparisonOpen = (action = 'customer-opened-comparison', packageIds = null) => {
         const session = openTokSessionSingleton.getSession();
         if (!session) return;
-        // Use compareList for current comparison selection
-        const packageIds = compareList.map((p) => p.id);
+        
+        // Use compareList for current comparison selection if no packageIds provided
+        const ids = packageIds || compareList.map((p) => p.id);
+        
+        console.log("🎭 Sending comparison action via sendSharedComparisonOpen:", action, "with IDs:", ids);
+        
+        // Send both to "comparison-action" for consistency
         openTokSessionSingleton.sendSignal(
             {
-                type: "shared-comparison-open",
+                type: "comparison-action",
                 data: JSON.stringify({
-                    action: "customer-opened-comparison",
-                    packageIds,
-                    ts: new Date().toISOString(),
+                    action,
+                    packageIds: ids,
+                    userType: 'customer',
+                    timestamp: new Date().toISOString(),
                 }),
             },
             (err) => {
                 if (err) {
-                    console.error("Failed to send shared-comparison-open signal:", err);
+                    console.error("Failed to send comparison action signal:", err);
                 } else {
-                    console.log("Sent shared-comparison-open signal to agent");
+                    console.log("✅ Successfully sent comparison action signal:", action);
                 }
             }
         );
+        
+        // Also send to legacy channel for backward compatibility
+        if (action === 'customer-opened-comparison') {
+            openTokSessionSingleton.sendSignal(
+                {
+                    type: "shared-comparison-open",
+                    data: JSON.stringify({
+                        action: "customer-opened-comparison",
+                        packageIds: ids,
+                        ts: new Date().toISOString(),
+                    }),
+                },
+                (err) => {
+                    if (err) {
+                        console.error("Failed to send shared-comparison-open signal:", err);
+                    }
+                }
+            );
+        }
     };
 
     // Call this when customer clicks compare button
@@ -834,24 +859,34 @@ const CustomerConversationWrapper = ({
 
 
 
-    const sendComparisonAction = (action) => {
-        console.log("🎭 Customer sending comparison action:", action);
+    const sendComparisonAction = (action, packageIds = null) => {
+        console.log("🎭 Customer sending comparison action:", action, "with package IDs:", packageIds);
         const session = openTokSessionSingleton.getSession();
         console.log("🎭 Customer comparison action session:", session);
         if (!session) return;
-console.log("🎭 Customer comparison action session available, sending signal");
+        
+        const signalData = {
+            action,
+            userType: 'customer',
+            timestamp: new Date().toISOString(),
+        };
+        
+        // Add package IDs if provided
+        if (packageIds && packageIds.length > 0) {
+            signalData.packageIds = packageIds;
+        }
+        
+        console.log("🎭 Customer comparison action session available, sending signal with data:", signalData);
         openTokSessionSingleton.sendSignal(
             {
                 type: "comparison-action",
-                data: JSON.stringify({
-                    action,
-                    userType: 'customer',
-                    timestamp: new Date().toISOString(),
-                }),
+                data: JSON.stringify(signalData),
             },
             (err) => {
                 if (err) {
                     console.error("Failed to send comparison action signal:", err);
+                } else {
+                    console.log("✅ Successfully sent comparison action signal:", action);
                 }
             }
         );

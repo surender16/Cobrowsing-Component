@@ -139,7 +139,31 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
   const lastBoundaryRef = useRef(null);
 
   // Use scroll sync hook for package details (enabled only when modal is open)
-  const { scrollRef, isActiveController } = useCoBrowseScrollSync(userType, open, 'details');
+  const { 
+    scrollRef, 
+    isActiveController, 
+    syncToPosition, 
+    isIncomingScroll, 
+    isScrollAnimating,
+    syncStatus,
+    syncProgress,
+    syncError,
+    resetSync
+  } = useCoBrowseScrollSync(userType, open, 'details');
+
+  // Add sync status indicator
+  useEffect(() => {
+    if (syncError) {
+      console.log(`📊 [${userType}] Sync error:`, syncError);
+    }
+  }, [syncError, userType]);
+
+  // Reset sync when modal opens
+  useEffect(() => {
+    if (open) {
+      resetSync();
+    }
+  }, [open, resetSync]);
 
   // Use package details co-browsing hook
   const {
@@ -178,9 +202,6 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     clearIncomingActions,
   } = usePackageDetailsCoBrowse(userType, true);
 
-  // Invoke the useCoBrowseScrollSync hook to provide the syncToPosition function
-  const { syncToPosition, isIncomingScroll, isScrollAnimating } = useCoBrowseScrollSync('package-details');
-
   // Effect to handle modal opening and send signal to other party
   useEffect(() => {
     if (open && packageData && !hasSentOpenSignalRef.current) {
@@ -216,14 +237,16 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
   const closeFromSignalRef = React.useRef(false);
 
   useEffect(() => {
-    if (incomingModalClose) {
+    if (incomingModalClose && !isClosingRef.current) {
       console.log(`📦 [${userType}] Received modal close signal`);
+      isClosingRef.current = true;
       closeFromSignalRef.current = true; // Mark that we're closing due to signal
       onClose();
       // Reset after a short delay
       setTimeout(() => {
         closeFromSignalRef.current = false;
-      }, 100);
+        isClosingRef.current = false;
+      }, 200);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingModalClose, onClose]);
@@ -393,8 +416,8 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     
     // Only send close signal if this close wasn't triggered by an incoming signal
     if (!closeFromSignalRef.current) {
-      console.log(`[${userType}] Sending modal close signal`);
       sendModalClose();
+      console.log(`[${userType}] Sending modal close signal`);
     } else {
       console.log(`[${userType}] Skip sending close signal - closed due to incoming signal`);
     }
@@ -415,77 +438,26 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     }
   }, [open]);
 
-  // Smooth scroll sync: throttle mid-scroll, snap at edges, always allow syncing
+  // Monitor scroll position for UI updates (floating buttons, etc.)
   useEffect(() => {
-    const handleScrollUpdate = () => {
-      const el = scrollRef.current;
-      if (!el) return;
-      // Skip when applying incoming programmatic scroll to prevent ping-pong
-      if (isIncomingScroll || isScrollAnimating) return;
-
-      const scrollTop = el.scrollTop;
-      const maxScrollTop = el.scrollHeight - el.clientHeight;
-
+    const handleScroll = () => {
+      if (!scrollRef.current) return;
+      const scrollTop = scrollRef.current.scrollTop;
+      
+      // Update UI state only
       setScrollY(scrollTop);
       setIsFloatingButtonsVisible(scrollTop > 200);
-
-      const epsilon = 2;
-      const nearTop = scrollTop <= epsilon;
-      const nearBottom = maxScrollTop >= 0 && Math.abs(scrollTop - maxScrollTop) <= epsilon;
-
-      // Always sync at boundaries, but throttle to prevent excessive signals
-      if (nearTop) {
-        const now = Date.now();
-        if (now - lastManualSyncAtRef.current > 100) { // Reduced throttle for boundaries
-          console.log(`📊 [${userType}] Syncing at top boundary`);
-          lastManualSyncAtRef.current = now;
-          lastManualSyncTopRef.current = 0;
-          syncToPosition(0, 0);
-        }
-        return;
-      }
-
-      if (nearBottom) {
-        const now = Date.now();
-        if (now - lastManualSyncAtRef.current > 100) { // Reduced throttle for boundaries
-          console.log(`📊 [${userType}] Syncing at bottom boundary`);
-          lastManualSyncAtRef.current = now;
-          lastManualSyncTopRef.current = maxScrollTop;
-          syncToPosition(maxScrollTop, 0);
-        }
-        return;
-      }
-
-      // Mid-scroll: throttle and require meaningful movement for smoothness
-      const now = Date.now();
-      const throttleMs = 120; // Further reduced throttle for better responsiveness
-      const movementThreshold = 8; // Further reduced threshold for more sensitive syncing
-      
-      // Always sync if enough time has passed and there's meaningful movement
-      if (
-        now - lastManualSyncAtRef.current > throttleMs &&
-        Math.abs(scrollTop - lastManualSyncTopRef.current) > movementThreshold
-      ) {
-        lastManualSyncAtRef.current = now;
-        lastManualSyncTopRef.current = scrollTop;
-        syncToPosition(scrollTop, 0);
-      }
-      
-      // Fallback: if we haven't synced in a while, force a sync to prevent getting stuck
-      if (now - lastManualSyncAtRef.current > 1000) { // 1 second fallback
-        console.log(`📊 [${userType}] Fallback sync triggered at scrollTop: ${scrollTop}`);
-        lastManualSyncAtRef.current = now;
-        lastManualSyncTopRef.current = scrollTop;
-        syncToPosition(scrollTop, 0);
-      }
     };
- 
+
     const scrollElement = scrollRef.current;
     if (scrollElement && open) {
-      scrollElement.addEventListener('scroll', handleScrollUpdate, { passive: true });
-      return () => scrollElement.removeEventListener('scroll', handleScrollUpdate);
+      scrollElement.addEventListener('scroll', handleScroll, { passive: true });
+      
+      return () => {
+        scrollElement.removeEventListener('scroll', handleScroll);
+      };
     }
-  }, [open, scrollRef, syncToPosition, isIncomingScroll, isScrollAnimating, userType]);
+  }, [open, scrollRef]);
   
 
   useEffect(() => {
