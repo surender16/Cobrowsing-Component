@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Box,
   Container,
@@ -26,9 +26,20 @@ import {
   Lock as LockIcon,
   CheckCircle as CheckCircleIcon,
 } from "@mui/icons-material";
+import { syncManager } from "../../sync/syncManager";
 
 const PaymentSection = ({ onClose, packageData }) => {
   const [activeStep, setActiveStep] = useState(0);
+
+  // Listen to syncManager for payment step changes
+  useEffect(() => {
+    const unsubscribe = syncManager.onStateChange((state) => {
+      if (state.metadata?.paymentStep !== undefined) {
+        setActiveStep(state.metadata.paymentStep);
+      }
+    });
+    return unsubscribe;
+  }, []);
   const [paymentMethod, setPaymentMethod] = useState("card");
   const [paymentDetails, setPaymentDetails] = useState({
     cardHolderName: "",
@@ -143,16 +154,22 @@ const PaymentSection = ({ onClose, packageData }) => {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (validate()) {
-      setActiveStep(2); // Move to thank you page
+      const newStep = 2;
+      setActiveStep(newStep);
+      syncManager.paymentStep(newStep);
     }
   };
 
   const handleContinueToPayment = () => {
-    setActiveStep(1);
+    const newStep = 1;
+    setActiveStep(newStep);
+    syncManager.paymentStep(newStep);
   };
 
   const handleBack = () => {
-    setActiveStep((prev) => prev - 1);
+    const newStep = activeStep - 1;
+    setActiveStep(newStep);
+    syncManager.paymentStep(newStep);
   };
 
   // Calculate totals

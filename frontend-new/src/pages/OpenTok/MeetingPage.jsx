@@ -38,6 +38,7 @@ import {
   Cast,
   CardTravel,
   Compare as CompareIcon,
+  Payment as PaymentIcon,
 } from "@mui/icons-material";
 import VideoFileIcon from "@mui/icons-material/VideoFile";
 import { pdfjs } from "react-pdf";
@@ -1233,6 +1234,20 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
         </Tooltip>
       )}
 
+      {/* Payment Navigation */}
+      <Tooltip title="Payment">
+        <IconButton
+          onClick={() => {
+            console.log("🎭 Agent clicked 'Payment'");
+            syncManager.navigate('payment');
+          }}
+          sx={{ color: "white" }}
+          disabled={isAnyDialogOpen}
+        >
+          <PaymentIcon />
+        </IconButton>
+      </Tooltip>
+
       <Tooltip title="Upload & Send Document for Signing">
         <IconButton
           onClick={() => {
@@ -2153,6 +2168,35 @@ useLayoutEffect(() => {
               </Button>
             </DialogActions>
           )}
+        </Dialog>
+      )}
+
+      {/* Payment View */}
+      {syncManager.getState().view === 'payment' && (
+        <Dialog
+          open={true}
+          onClose={() => syncManager.navigate('catalog')}
+          maxWidth="md"
+          fullWidth
+          sx={{
+            "& .MuiDialog-paper": { minHeight: "90vh", maxHeight: "95vh" },
+          }}
+        >
+          <DialogTitle sx={{ bgcolor: "primary.main", color: "white", display: "flex", gap: 2 }}>
+            <PaymentIcon />
+            Payment Processing
+            <IconButton
+              edge="end"
+              color="inherit"
+              onClick={() => syncManager.navigate('catalog')}
+              sx={{ ml: 'auto' }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent>
+            <PaymentSection />
+          </DialogContent>
         </Dialog>
       )}
       <TourComparisonModal
