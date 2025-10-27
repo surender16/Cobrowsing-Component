@@ -81,16 +81,16 @@ const AgentCatalog = ({
 
   // Effect to handle opening/closing modal from customer signal (handled by parent)
   useEffect(() => {
-    if (packageDetailsToOpen === null && modalOpen) {
-      // Incoming close signal
-      console.log(`[Agent Catalog] Closing modal from parent signal`);
-      setModalOpen(false);
-      setSelectedPackage(null);
-    } else if (packageDetailsToOpen) {
+    if (packageDetailsToOpen) {
       // Incoming open signal
       console.log(`📦 [agent] Opening modal from parent signal with package:`, packageDetailsToOpen.id);
       setSelectedPackage(packageDetailsToOpen);
       setModalOpen(true);
+    } else {
+      // Incoming close signal
+      console.log(`[Agent Catalog] Closing modal from parent signal`);
+      setModalOpen(false);
+      setSelectedPackage(null);
     }
   }, [packageDetailsToOpen, modalOpen]);
 
@@ -176,7 +176,7 @@ const AgentCatalog = ({
               color="primary"
               sx={{ ml: 2, fontWeight: "bold" }}
             />
-            
+
             {/* Comparison Notification */}
             {compareList && compareList.length > 0 && (
               <Chip
@@ -408,12 +408,12 @@ const AgentCatalog = ({
                     borderRadius: 3,
                     overflow: "hidden",
                     cursor: "pointer",
-                    border: isInComparison(pkg.id) ? "3px solid #4caf50" : 
-                           selectedPackages.includes(pkg.id) ? "3px solid" : "2px solid transparent",
+                    border: isInComparison(pkg.id) ? "3px solid #4caf50" :
+                      selectedPackages.includes(pkg.id) ? "3px solid" : "2px solid transparent",
                     borderColor: isInComparison(pkg.id) ? "#4caf50" :
-                               selectedPackages.includes(pkg.id) ? "primary.main" : "transparent",
+                      selectedPackages.includes(pkg.id) ? "primary.main" : "transparent",
                     boxShadow: isInComparison(pkg.id) ? "0 8px 25px rgba(76, 175, 80, 0.3)" :
-                              selectedPackages.includes(pkg.id) ? "0 8px 25px rgba(0,0,0,0.15)" : "0 2px 8px rgba(0,0,0,0.1)",
+                      selectedPackages.includes(pkg.id) ? "0 8px 25px rgba(0,0,0,0.15)" : "0 2px 8px rgba(0,0,0,0.1)",
                     transition:
                       "all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)",
                     "&:hover": {

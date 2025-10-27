@@ -47,7 +47,9 @@ const CustomerCatalogView = ({
       console.log(`📦 [${userType}] Opening modal from parent signal with package:`, packageDetailsToOpen.id);
       setSelectedPackage(packageDetailsToOpen);
       setModalOpen(true);
-    }
+    } else {
+      setModalOpen(false);
+    } 
   }, [packageDetailsToOpen, userType]);
 
   // Modal handlers
