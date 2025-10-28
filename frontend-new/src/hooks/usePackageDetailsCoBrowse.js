@@ -185,6 +185,76 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
     handleComparisonAction, handlePaymentAction, handlePaymentFieldChange, handleModalOpen, handleModalClose,
     handleActivitiesModalOpen, handleActivitiesModalClose]);
 
+  // Register OpenTok payment signal listeners (authoritative for payment sync)
+  useEffect(() => {
+    if (!enabled) return;
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (!session) return;
+
+    const onModalOpened = (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        if (payload.userType === userType) return;
+        setIncomingPaymentAction({ action: 'payment-modal-opened', step: payload.step, userType: payload.userType, data: payload });
+      } catch (e) { console.error('payment-modal-opened parse error', e); }
+    };
+    const onModalClosed = (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        if (payload.userType === userType) return;
+        setIncomingPaymentAction({ action: 'payment-modal-closed', step: 0, userType: payload.userType, data: payload });
+      } catch (e) { console.error('payment-modal-closed parse error', e); }
+    };
+    const onStepChange = (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        if (payload.userType === userType) return;
+        setIncomingPaymentAction({ action: 'payment-step-change', step: payload.step, userType: payload.userType, data: payload });
+      } catch (e) { console.error('payment-step-change parse error', e); }
+    };
+    const onFieldChange = (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        if (payload.userType === userType) return;
+        setIncomingPaymentFieldChange({ userType: payload.userType, data: { fieldName: payload.fieldName, fieldValue: payload.fieldValue } });
+      } catch (e) { console.error('payment-field-change parse error', e); }
+    };
+    const onButtonClick = (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        if (payload.userType === userType) return;
+        setIncomingPaymentAction({ action: 'payment-button-click', userType: payload.userType, data: payload });
+      } catch (e) { console.error('payment-button-click parse error', e); }
+    };
+    const onSuccess = (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        if (payload.userType === userType) return;
+        setIncomingPaymentAction({ action: 'payment-success', step: 2, userType: payload.userType, data: payload });
+      } catch (e) { console.error('payment-success parse error', e); }
+    };
+
+    session.on('signal:payment-modal-opened', onModalOpened);
+    session.on('signal:payment-modal-closed', onModalClosed);
+    session.on('signal:payment-step-change', onStepChange);
+    session.on('signal:payment-field-change', onFieldChange);
+    session.on('signal:payment-button-click', onButtonClick);
+    session.on('signal:payment-success', onSuccess);
+
+    return () => {
+      try {
+        session.off('signal:payment-modal-opened', onModalOpened);
+        session.off('signal:payment-modal-closed', onModalClosed);
+        session.off('signal:payment-step-change', onStepChange);
+        session.off('signal:payment-field-change', onFieldChange);
+        session.off('signal:payment-button-click', onButtonClick);
+        session.off('signal:payment-success', onSuccess);
+      } catch (e) {
+        console.warn('Cleanup payment listeners failed', e);
+      }
+    };
+  }, [enabled, userType]);
+
   // Action senders - use the singleton's isIncomingActionRef
   const sendTabChange = useCallback((tabIndex) => {
     if (!enabled || packageDetailsCoBrowseSingleton.isIncomingActionRef.current) return;
@@ -251,9 +321,25 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
 
   const sendPaymentAction = useCallback((action, data = {}) => {
     if (!enabled || packageDetailsCoBrowseSingleton.isIncomingActionRef.current) return;
-
-    console.log(`📦 [${userType}] Sending payment action:`, action, data);
-    packageDetailsCoBrowseSingleton.sendAction('payment-action', { action, ...data }, userType);
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (!session) return;
+    const actionType = (data && data.action) ? data.action : action;
+    const payload = { ...data, userType, timestamp: new Date().toISOString() };
+    const maxRetries = 3;
+    let attempts = 0;
+    const sendOnce = () => {
+      attempts += 1;
+      console.log(`📡 [${userType}] Sending payment signal: ${actionType} attempt ${attempts}`, payload);
+      openTokSessionSingleton.sendSignal({ type: actionType, data: JSON.stringify(payload) }, (err) => {
+        if (err && attempts < maxRetries) {
+          console.warn('Retrying payment signal due to error:', err);
+          setTimeout(sendOnce, 300 * attempts);
+        } else if (err) {
+          console.error('Failed to send payment signal after retries:', err);
+        }
+      });
+    };
+    sendOnce();
   }, [enabled, userType]);
 
   const sendModalOpen = useCallback((packageData) => {
@@ -309,9 +395,23 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
 
   const sendPaymentFieldChange = useCallback((fieldName, fieldValue) => {
     if (!enabled || packageDetailsCoBrowseSingleton.isIncomingActionRef.current) return;
-
-    console.log(`📦 [${userType}] Sending payment field change:`, fieldName, fieldValue);
-    packageDetailsCoBrowseSingleton.sendAction('payment-field-change', { fieldName, fieldValue }, userType);
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (!session) return;
+    const payload = { fieldName, fieldValue, userType, timestamp: new Date().toISOString() };
+    const maxRetries = 3;
+    let attempts = 0;
+    const sendOnce = () => {
+      attempts += 1;
+      console.log(`📡 [${userType}] Sending payment signal: payment-field-change attempt ${attempts}`, payload);
+      openTokSessionSingleton.sendSignal({ type: 'payment-field-change', data: JSON.stringify(payload) }, (err) => {
+        if (err && attempts < maxRetries) {
+          setTimeout(sendOnce, 300 * attempts);
+        } else if (err) {
+          console.error('Failed to send payment field change after retries:', err);
+        }
+      });
+    };
+    sendOnce();
   }, [enabled, userType]);
 
   // Clear incoming actions after processing

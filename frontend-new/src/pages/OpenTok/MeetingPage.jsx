@@ -496,10 +496,55 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
             }
           });
 
-          // Add a general signal listener for debugging
+        // Add a general signal listener for debugging
           openTokSessionSingleton.registerGeneralSignalListener((event) => {
             console.log("🔌 Agent received general signal:", event.type, event.data);
           });
+
+          // Register payment-related signal listeners (for parity/debug and possible UI hooks)
+          const sessionRefLocal = openTokSessionSingleton.getSession();
+          if (sessionRefLocal) {
+            const onPaymentModalOpened = (ev) => {
+              console.log('💳 signal:payment-modal-opened', ev?.data);
+            };
+            const onPaymentModalClosed = (ev) => {
+              console.log('💳 signal:payment-modal-closed', ev?.data);
+            };
+            const onPaymentStepChange = (ev) => {
+              console.log('💳 signal:payment-step-change', ev?.data);
+            };
+            const onPaymentFieldChange = (ev) => {
+              console.log('💳 signal:payment-field-change', ev?.data);
+            };
+            const onPaymentButtonClick = (ev) => {
+              console.log('💳 signal:payment-button-click', ev?.data);
+            };
+            const onPaymentSuccess = (ev) => {
+              console.log('💳 signal:payment-success', ev?.data);
+            };
+            sessionRefLocal.on('signal:payment-modal-opened', onPaymentModalOpened);
+            sessionRefLocal.on('signal:payment-modal-closed', onPaymentModalClosed);
+            sessionRefLocal.on('signal:payment-step-change', onPaymentStepChange);
+            sessionRefLocal.on('signal:payment-field-change', onPaymentFieldChange);
+            sessionRefLocal.on('signal:payment-button-click', onPaymentButtonClick);
+            sessionRefLocal.on('signal:payment-success', onPaymentSuccess);
+
+            // Cleanup on unmount/disconnect
+            const cleanupPaymentSignals = () => {
+              try {
+                sessionRefLocal.off('signal:payment-modal-opened', onPaymentModalOpened);
+                sessionRefLocal.off('signal:payment-modal-closed', onPaymentModalClosed);
+                sessionRefLocal.off('signal:payment-step-change', onPaymentStepChange);
+                sessionRefLocal.off('signal:payment-field-change', onPaymentFieldChange);
+                sessionRefLocal.off('signal:payment-button-click', onPaymentButtonClick);
+                sessionRefLocal.off('signal:payment-success', onPaymentSuccess);
+              } catch (e) {
+                console.warn('Payment signal cleanup failed', e);
+              }
+            };
+            // Store on window for safety in case unmount path differs
+            window.__cleanupPaymentSignals = cleanupPaymentSignals;
+          }
 
           try {
             const devices = await navigator.mediaDevices.enumerateDevices();
@@ -711,6 +756,10 @@ const MeetingPage = ({ sessionId, onCallEnd, onRemoteJoinStateChange }) => {
       isMounted = false;
       if (openTokSessionSingleton.isSessionAvailable()) {
         openTokSessionSingleton.getSession().disconnect();
+      }
+      if (typeof window !== 'undefined' && window.__cleanupPaymentSignals) {
+        window.__cleanupPaymentSignals();
+        delete window.__cleanupPaymentSignals;
       }
       // Cleanup signal handlers
       openTokSessionSingleton.unregisterSignalHandler("signal:file-share");

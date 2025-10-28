@@ -527,7 +527,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       agreeToTerms: false,
     });
     setPaymentFormFilledBy(null);
-    sendPaymentAction('payment-action', { action: 'payment-success', step: 2 });
+    sendPaymentAction('payment-success', { action: 'payment-success', step: 2 });
   };
 
   const handleClosePaymentModal = () => {
@@ -537,7 +537,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     setPaymentError(false);
     // Reset form tracking when modal closes
     setPaymentFormFilledBy(null);
-    sendPaymentAction('payment-action', { action: 'payment-modal-closed', step: 0 });
+    sendPaymentAction('payment-modal-closed', { action: 'payment-modal-closed', step: 0 });
   };
 
   const handleOpenPaymentModal = () => {
@@ -545,17 +545,17 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     setPaymentStep(0); // Start at order summary
     // Reset form tracking when modal opens
     setPaymentFormFilledBy(null);
-    sendPaymentAction('payment-action', { action: 'payment-modal-opened', step: 0 });
+    sendPaymentAction('payment-modal-opened', { action: 'payment-modal-opened', step: 0 });
   };
 
   const handleContinueToPayment = () => {
     setPaymentStep(1); // Move to payment details
-    sendPaymentAction('payment-action', { action: 'payment-step-change', step: 1 });
+    sendPaymentAction('payment-step-change', { action: 'payment-step-change', step: 1 });
   };
 
   const handleBackToSummary = () => {
     setPaymentStep(0); // Go back to order summary
-    sendPaymentAction('payment-action', { action: 'payment-step-change', step: 0 });
+    sendPaymentAction('payment-step-change', { action: 'payment-step-change', step: 0 });
   };
 
   const handlePaymentFieldChange = (fieldName, fieldValue) => {
@@ -2641,7 +2641,14 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
                   <Button
                     variant="contained"
                     size="large"
-                    onClick={handlePaymentSuccess}
+                    onClick={() => {
+                      if (!paymentFormData.agreeToTerms) {
+                        setPaymentError(true);
+                        return;
+                      }
+                      sendPaymentAction('payment-button-click', { action: 'payment-button-click', button: 'pay' });
+                      handlePaymentSuccess();
+                    }}
                     sx={{
                       flex: 2,
                       py: 1.5,
