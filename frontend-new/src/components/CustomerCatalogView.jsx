@@ -17,7 +17,7 @@ import {
 import CompareArrowsIcon from "@mui/icons-material/CompareArrows";
 import AddIcon from "@mui/icons-material/Add";
 import CheckIcon from "@mui/icons-material/Check";
-import { useCoBrowseScrollSync } from "../hooks/useCoBrowseScrollSync";
+import { useEnhancedScrollSync } from "../hooks/useEnhancedScrollSync";
 import PackageDetailsModal from "./PackageDetailsModal";
 
 const CustomerCatalogView = ({
@@ -38,8 +38,8 @@ const CustomerCatalogView = ({
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState(null);
 
-  // Co-browse scroll sync hook
-  const { scrollRef, isActiveController } = useCoBrowseScrollSync(userType, true, 'catalog');
+  // Enhanced scroll sync hook with unified container id for shared lists
+  const { scrollRef, isLeader: isActiveController } = useEnhancedScrollSync({ containerId: 'shared-packages', userType, enabled: true, throttleMs: 80 });
 
   // Effect to handle opening modal from other party's signal (handled by parent)
   useEffect(() => {
@@ -83,7 +83,7 @@ const CustomerCatalogView = ({
   return (
     <Box sx={{ position: 'relative', height: '80vh', display: 'flex', flexDirection: 'column' }}>
       <DialogContent
-        sx={{ p: 0, flex: 1, display: 'flex', flexDirection: 'column' }}
+        sx={{ p: 0, flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
       >
         {/* Header with sync indicator */}
         <Box sx={{
@@ -136,7 +136,7 @@ const CustomerCatalogView = ({
         {/* Scrollable Packages Grid */}
         <Box
           ref={scrollRef}
-          id="agent-catalog-scroll"
+          id={`shared-packages-scroll-${userType}`}
           sx={{
             flex: 1,
             overflowY: 'auto',

@@ -47,7 +47,7 @@ import {
   Favorite as HeartIcon,
   Share as ShareIcon,
 } from '@mui/icons-material';
-import { useCoBrowseScrollSync } from '../../hooks/useCoBrowseScrollSync';
+import { useEnhancedScrollSync } from '../../hooks/useEnhancedScrollSync';
 // Removed direct OpenTok session usage (handled by syncManager elsewhere)
 
 const Transition = React.forwardRef(function Transition(props, ref) {
@@ -56,22 +56,12 @@ const Transition = React.forwardRef(function Transition(props, ref) {
 
 const TourComparisonModal = ({ open, onClose, compareList, onClearComparison, getBestValue, userType = 'agent', sendComparisonAction }) => {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));      
 
-  // Enhanced scroll sync with optimized settings
-  const {
-    scrollRef,
-    isActiveController,
-    syncToPosition,
-    isIncomingScroll,
-    isScrollAnimating,
-    getScrollPosition
-  } = useCoBrowseScrollSync(userType, open, 'comparison', {
-    passive: false,  // non-passive for better control
-    throttleDelay: 16, // ~60fps for smoother sync
-    enforceSync: true // ensure strict synchronization
-  });
-
+  // Enhanced scroll sync with optimized settings (adaptive throttling + echo prevention)
+  const { scrollRef } = useEnhancedScrollSync({ containerId: 'comparison-modal', userType, enabled: open, throttleMs: 100 });
+  const isActiveController = false; 
+ 
   // The useCoBrowseScrollSync hook handles all scroll syncing
   // No additional custom scroll handling needed
 
@@ -114,7 +104,7 @@ const TourComparisonModal = ({ open, onClose, compareList, onClearComparison, ge
       sendComparisonAction('close-comparison', ids);
     }
     
-    onClose();
+    onClose(); 
   };
 
   const formatHighlights = (description) => {
@@ -1315,6 +1305,7 @@ const TourComparisonModal = ({ open, onClose, compareList, onClearComparison, ge
         ) : (
           <Box
             ref={scrollRef}
+            id={`comparison-modal-scroll-${userType}`}
             sx={{
               height: 'calc(100vh - 180px)',
               overflow: 'auto',

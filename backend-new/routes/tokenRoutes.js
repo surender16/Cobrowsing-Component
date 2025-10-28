@@ -1,8 +1,18 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import fs from "fs";
+import path from "path";
+import { fileURLToPath } from 'url';
 const router = express.Router();
-const privateKey = fs.readFileSync("./cred/private-key.pem", "utf8");
+let privateKey = null;
+try {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const keyPath = path.resolve(__dirname, "../cred/private-key.pem");
+  privateKey = fs.readFileSync(keyPath, "utf8");
+} catch (e) {
+  console.warn("⚠️ Private key not found for cobrowse-token. /cobrowse-token will be disabled.");
+}
 
 export default (opentok, apiKey) => {
   router.post("/opentok-token", (req, res) => {
@@ -33,6 +43,9 @@ export default (opentok, apiKey) => {
   });
 
   router.post("/cobrowse-token", (req, res) => {
+    if (!process.env.COBROWSE_LICENSE_KEY || !privateKey) {
+      return res.status(503).json({ error: "Cobrowse token signing not configured" });
+    }
     const now = new Date();
     const expires = new Date(now.getTime() + 2 * 60 * 1000); // +2 minutes
 

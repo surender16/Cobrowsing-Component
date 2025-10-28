@@ -94,10 +94,11 @@ import {
   Home as HomeIcon,
   Business as BusinessIcon,
 } from '@mui/icons-material';
-import { useUnifiedScrollSync } from '../hooks/useUnifiedScrollSync';
+import { useEnhancedScrollSync } from '../hooks/useEnhancedScrollSync';
 import { usePackageDetailsCoBrowse } from '../hooks/usePackageDetailsCoBrowse';
 import ActivitiesModal from './ActivitiesModal';
 import { useCoBrowseScrollSync } from '../hooks/useCoBrowseScrollSync';
+// removed duplicate import of useUnifiedScrollSync
 
 const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer' }) => {
   const [activeTab, setActiveTab] = useState(0);
@@ -135,21 +136,17 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
   const slideshowInterval = useRef(null);
   const hasSentOpenSignalRef = useRef(false);
   const lastManualSyncAtRef = useRef(0);
-  const lastManualSyncTopRef = useRef(0);
+  const lastManualSyncTopRef = useRef(0);  
   const lastBoundaryRef = useRef(null);
 
   // Use scroll sync hook for package details (enabled only when modal is open)
-  const { 
-    scrollRef, 
-    isActiveController, 
-    syncToPosition, 
-    isIncomingScroll, 
-    isScrollAnimating,
-    syncStatus,
-    syncProgress,
-    syncError,
-    resetSync
-  } = useCoBrowseScrollSync(userType, open, 'details');
+  // New unified scroll sync (percent-based via OpenTok)
+  const { scrollRef, isLeader, syncStatus } = useEnhancedScrollSync({ containerId: 'package-details', userType, enabled: open, throttleMs: 100 });
+  // Backward-compatible flags (not used visually here)
+  // const syncStatus = 'idle';
+  const syncProgress = 0;
+  const syncError = null;  
+  const resetSync = () => { };
 
   // Add sync status indicator
   useEffect(() => {
@@ -413,7 +410,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
 
   const handleCloseModal = () => {
     console.log(`[${userType}] handleCloseModal called, closeFromSignal:`, closeFromSignalRef.current);
-    
+
     // Only send close signal if this close wasn't triggered by an incoming signal
     if (!closeFromSignalRef.current) {
       sendModalClose();
@@ -443,7 +440,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     const handleScroll = () => {
       if (!scrollRef.current) return;
       const scrollTop = scrollRef.current.scrollTop;
-      
+
       // Update UI state only
       setScrollY(scrollTop);
       setIsFloatingButtonsVisible(scrollTop > 200);
@@ -452,13 +449,13 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     const scrollElement = scrollRef.current;
     if (scrollElement && open) {
       scrollElement.addEventListener('scroll', handleScroll, { passive: true });
-      
+
       return () => {
         scrollElement.removeEventListener('scroll', handleScroll);
       };
     }
   }, [open, scrollRef]);
-  
+
 
   useEffect(() => {
     if (isImageSlideshow && packageData?.images?.length) {
@@ -486,7 +483,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       const actionData = incomingPaymentAction.data || incomingPaymentAction;
       const { action, step } = actionData;
       console.log(`📦 [${userType}] Received payment action:`, action, 'step:', step);
-      
+
       if (action === 'payment-step-change' && typeof step === 'number') {
         setPaymentStep(step);
       } else if (action === 'payment-success') {
@@ -712,7 +709,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
         </Box>
         <Box display="flex" gap={1} justifyContent={{ xs: 'center', sm: 'flex-end' }} width={{ xs: '100%', sm: 'auto' }}>
           {/* Scroll Sync Indicator */}
-          <Tooltip title={isActiveController ? "You're controlling scroll" : "Scroll synchronized with other party"}>
+          <Tooltip title={isLeader ? "You're controlling scroll" : "Scroll synchronized with other party"}>
             <Box
               sx={{
                 display: 'flex',
@@ -720,12 +717,12 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
                 gap: 0.5,
                 px: 1,
                 py: 0.5,
-                bgcolor: isActiveController ? 'warning.main' : 'success.main',
+                bgcolor: isLeader ? 'warning.main' : 'success.main',
                 color: 'white',
                 borderRadius: 1,
                 fontSize: '0.7rem',
                 fontWeight: 'bold',
-                animation: isActiveController ? 'none' : 'pulse 2s infinite',
+                animation: isLeader ? 'none' : 'pulse 2s infinite',
                 '@keyframes pulse': {
                   '0%': { opacity: 1 },
                   '50%': { opacity: 0.7 },
@@ -734,7 +731,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
               }}
             >
               <SyncIcon sx={{ fontSize: '0.8rem' }} />
-              {isActiveController ? 'CONTROLLING' : 'SYNC'}
+              {isLeader ? 'CONTROLLING' : 'SYNC'}
             </Box>
           </Tooltip>
           <Tooltip title="Add to Wishlist">
@@ -794,7 +791,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
   const renderImageGallery = () => (
     <Box sx={{ mb: { xs: 2, sm: 3 }, position: 'relative' }}>
       <Grid container spacing={{ xs: 1, sm: 1.5 }}>
-        <Grid size={{xs: 12, md: 9}}>
+        <Grid size={{ xs: 12, md: 9 }}>
           <Card
             elevation={6}
             sx={{
@@ -972,17 +969,18 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
           </Card>
         </Grid>
 
-        <Grid size={{xs: 12, md: 3}}>
+        <Grid size={{ xs: 12, md: 3 }}>
           <Card
             elevation={6}
             sx={{
               height: { xs: 'auto', md: 600 },
               maxHeight: { xs: 300, sm: 400, md: 600 },
-              display: {xs: 'none', sm: 'none', lg: 'block'},
+              display: { xs: 'none', sm: 'none', lg: 'block' },
               overflowY: 'auto',
               border: `2px solid ${theme.palette.primary.main}`,
               borderRadius: { xs: 1, sm: 1.5 },
               overflow: 'hidden',
+
               background: theme.palette.background.paper,
               boxShadow: theme.shadows[12],
             }}
@@ -1176,7 +1174,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     <Fade in={!isLoading} timeout={1400}>
       <Box sx={{ mb: { xs: 2, sm: 3 } }}>
         <Grid container spacing={{ xs: 1.5, sm: 2 }}>
-          <Grid size={{xs: 12, sm: 6, md: 4}}>
+          <Grid size={{ xs: 12, sm: 6, md: 4 }}>
             <Card
               elevation={3}
               sx={{
@@ -1239,7 +1237,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
             </Card>
           </Grid>
 
-          <Grid size={{xs: 12, sm: 6, md: 4}}>
+          <Grid size={{ xs: 12, sm: 6, md: 4 }}>
             <Card
               elevation={3}
               sx={{
@@ -1379,314 +1377,314 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     }
 
     return (
-    <Grid container spacing={{ xs: 1.5, sm: 2 }} sx={{mb: "150px"}}>
-      <Grid size={{xs: 12, md: 9}}>
-        <Stepper orientation="vertical" activeStep={selectedDay}>
-          {packageData.itinerary?.map((day, index) => (
-            <Step key={index} expanded={true}>
-              <StepLabel
-                onClick={() => handleDaySelect(index)}
-                sx={{
-                  cursor: 'pointer',
-                  '& .MuiStepLabel-label': {
-                    fontWeight: selectedDay === index ? 'bold' : 'normal',
-                    color: selectedDay === index ? 'primary.main' : 'text.primary',
-                    fontSize: { xs: '0.9rem', sm: '1rem' },
-                  }
-                }}
-              >
-                <Box display="flex" alignItems="center" gap={{ xs: 1, sm: 1.5 }} flexWrap="wrap">
-                  <Typography variant="subtitle1" fontWeight="bold" sx={{
-                    fontSize: { xs: '0.85rem', sm: '0.95rem' },
-                    lineHeight: { xs: 1.2, sm: 1.4 }
-                  }}>
-                    {day.day} - {day.city}
-                  </Typography>
-                  <Chip
-                    label={day.date}
-                    size="small"
-                    color="primary"
-                    variant="outlined"
-                    sx={{
-                      fontWeight: 'bold',
-                      fontSize: { xs: '0.65rem', sm: '0.75rem' },
-                      '&:hover': { bgcolor: 'primary.light', color: 'white' },
-                      transition: 'all 0.3s ease',
-                    }}
-                  />
-                </Box>
-              </StepLabel>
-              <StepContent>
-                <Collapse in={selectedDay === index} timeout={500}>
-                  <Card
-                    elevation={selectedDay === index ? 6 : 2}
-                    sx={{
-                      p: { xs: 1.5, sm: 2 },
-                      border: selectedDay === index ? 2 : 0,
-                      borderColor: 'primary.main',
-                      borderRadius: { xs: 1.5, sm: 2 },
-                      transition: 'all 0.5s ease',
-                      mb: { xs: 1, sm: 1.5 },
-                      background: selectedDay === index
-                        ? `linear-gradient(135deg, ${theme.palette.primary.light}10, ${theme.palette.background.paper})`
-                        : 'background.paper',
-                    }}
-                  >
-                    {/* Flight Information */}
-                    {day.flightNote && (
-                      <Fade in={selectedDay === index} timeout={800}>
-                        <Box sx={{ mb: { xs: 1.5, sm: 2 } }}>
-                          <Box display="flex" alignItems="center" gap={{ xs: 1, sm: 1.5 }} mb={{ xs: 1, sm: 1.5 }}>
-                            <Avatar sx={{ bgcolor: 'info.main', width: { xs: 24, sm: 28 }, height: { xs: 24, sm: 28 } }}>
-                              <FlightIcon sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }} />
-                            </Avatar>
-                            <Typography variant="subtitle2" fontWeight="bold" color="info.main" sx={{
-                              fontSize: { xs: '0.8rem', sm: '0.875rem' }
-                            }}>
-                              FLIGHT
-                            </Typography>
-                          </Box>
-                          <Paper
-                            elevation={2}
-                            sx={{
-                              p: { xs: 1.5, sm: 2 },
-                              bgcolor: 'info.50',
-                              borderRadius: { xs: 1, sm: 1.5 },
-                              border: `1px solid ${theme.palette.info.light}`,
-                            }}
-                          >
-                            <Typography variant="body2" color="info.main" sx={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 1,
-                              fontSize: { xs: '0.75rem', sm: '0.8rem' }
-                            }}>
-                              <InfoIcon sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }} />
-                              {day.flightNote}
-                            </Typography>
-                          </Paper>
-                        </Box>
-                      </Fade>
-                    )}
-
-                    {/* Hotel Information */}
-                    {day.hotel && (
-                      <Fade in={selectedDay === index} timeout={1000}>
-                        <Box>
-                          <Box display="flex" alignItems="center" gap={{ xs: 1, sm: 1.5 }} mb={{ xs: 1, sm: 1.5 }}>
-                            <Avatar sx={{ bgcolor: 'success.main', width: { xs: 24, sm: 28 }, height: { xs: 24, sm: 28 } }}>
-                              <HotelIcon sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }} />
-                            </Avatar>
-                            <Typography variant="subtitle2" fontWeight="bold" color="success.main" sx={{
-                              fontSize: { xs: '0.8rem', sm: '0.875rem' }
-                            }}>
-                              HOTEL
-                            </Typography>
-                          </Box>
-                          <Paper elevation={3} sx={{ p: { xs: 1.5, sm: 2 }, borderRadius: { xs: 1, sm: 1.5 } }}>
-                            <Grid container spacing={{ xs: 1.5, sm: 2 }}>
-                              <Grid size={{xs: 12, md: 8}}>
-                                <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{
-                                  fontSize: { xs: '0.85rem', sm: '0.95rem' }
-                                }}>
-                                  {day.hotel.name}
-                                </Typography>
-                                <Box display="flex" alignItems="center" gap={1} mb={{ xs: 1, sm: 1.5 }}>
-                                  <Rating value={day.hotel.stars} readOnly size="small" />
-                                  <Typography variant="body2" fontWeight="bold" sx={{
-                                    fontSize: { xs: '0.7rem', sm: '0.8rem' }
-                                  }}>
-                                    ({day.hotel.rating})
-                                  </Typography>
-                                </Box>
-                                <Typography variant="body2" color="text.secondary" gutterBottom sx={{
-                                  fontSize: { xs: '0.7rem', sm: '0.8rem' }
-                                }}>
-                                  📍 {day.hotel.location}
-                                </Typography>
-                                <Typography variant="body2" fontWeight="bold" gutterBottom sx={{
-                                  fontSize: { xs: '0.7rem', sm: '0.8rem' }
-                                }}>
-                                  🛏️ {day.hotel.stay}
-                                </Typography>
-                                <Typography variant="body2" gutterBottom sx={{
-                                  fontSize: { xs: '0.7rem', sm: '0.8rem' }
-                                }}>
-                                  🏨 {day.hotel.type}
-                                </Typography>
-                                <Box sx={{ mt: { xs: 1, sm: 1.5 } }}>
-                                  {day.hotel.inclusions.map((inclusion, idx) => (
-                                    <Chip
-                                      key={idx}
-                                      label={inclusion}
-                                      size="small"
-                                      color="success"
-                                      variant="outlined"
-                                      sx={{
-                                        mr: { xs: 0.25, sm: 0.5 },
-                                        mb: { xs: 0.25, sm: 0.5 },
-                                        fontSize: { xs: '0.65rem', sm: '0.7rem' },
-                                        '&:hover': { bgcolor: 'success.light', color: 'white' },
-                                        transition: 'all 0.3s ease',
-                                      }}
-                                    />
-                                  ))}
-                                </Box>
-                              </Grid>
-                              <Grid size={{xs: 12, md: 4}}>
-                                <Card elevation={2} sx={{ borderRadius: { xs: 1, sm: 1.5 }, overflow: 'hidden' }}>
-                                  <CardMedia
-                                    component="img"
-                                    height={{ xs: 80, sm: 100 }}
-                                    image={day.hotel.image || '/api/placeholder/150/120'}
-                                    alt={day.hotel.name}
-                                    sx={{
-                                      transition: 'transform 0.3s ease',
-                                      '&:hover': { transform: 'scale(1.1)' },
-                                    }}
-                                  />
-                                </Card>
-                              </Grid>
-                            </Grid>
-                          </Paper>
-                        </Box>
-                      </Fade>
-                    )}
-                  </Card>
-                </Collapse>
-              </StepContent>
-            </Step>
-          ))}
-        </Stepper>
-      </Grid>
-
-      {/* Enhanced Sidebar */}
-      {packageData.sidebar && (
-      <Grid size={{xs: 12, md: 3}}>
-        <Card
-          elevation={4}
-          sx={{
-            position: 'sticky',
-            top: { xs: 80, sm: 100 },
-            borderRadius: { xs: 1.5, sm: 2 },
-            overflow: 'hidden',
-          }}
-        >
-          <Box
-            sx={{
-              background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
-              p: { xs: 1.5, sm: 2 },
-              color: 'white',
-            }}
-          >
-            <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{
-              fontSize: { xs: '0.85rem', sm: '0.95rem' }
-            }}>
-              Trip Timeline
-            </Typography>
-            <Typography variant="body2" sx={{
-              opacity: 0.9,
-              fontSize: { xs: '0.7rem', sm: '0.8rem' }
-            }}>
-              Click on any day to view details
-            </Typography>
-          </Box>
-          <CardContent sx={{ p: 0 }}>
-            <List dense>
-              {packageData.sidebar?.days?.map((date, index) => (
-                <ListItem
-                  key={index}
-                  button
-                  selected={selectedDay === index}
+      <Grid container spacing={{ xs: 1.5, sm: 2 }} sx={{ mb: "150px" }}>
+        <Grid size={{ xs: 12, md: 9 }}>
+          <Stepper orientation="vertical" activeStep={selectedDay}>
+            {packageData.itinerary?.map((day, index) => (
+              <Step key={index} expanded={true}>
+                <StepLabel
                   onClick={() => handleDaySelect(index)}
                   sx={{
-                    py: { xs: 1, sm: 1.5 },
-                    px: { xs: 1.5, sm: 2 },
-                    borderLeft: selectedDay === index ? 3 : 0,
-                    borderColor: 'primary.main',
-                    bgcolor: selectedDay === index ? 'primary.50' : 'transparent',
-                    '&:hover': {
-                      bgcolor: 'primary.100',
-                    },
-                    transition: 'all 0.3s ease',
-                  }}
-                >
-                  <ListItemIcon>
-                    <Avatar
-                      sx={{
-                        width: { xs: 24, sm: 28 },
-                        height: { xs: 24, sm: 28 },
-                        bgcolor: selectedDay === index ? 'primary.main' : 'grey.300',
-                        color: selectedDay === index ? 'white' : 'grey.600',
-                        fontSize: { xs: '0.65rem', sm: '0.75rem' },
-                        fontWeight: 'bold',
-                      }}
-                    >
-                      {index + 1}
-                    </Avatar>
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={date}
-                    primaryTypographyProps={{
+                    cursor: 'pointer',
+                    '& .MuiStepLabel-label': {
                       fontWeight: selectedDay === index ? 'bold' : 'normal',
                       color: selectedDay === index ? 'primary.main' : 'text.primary',
-                      fontSize: { xs: '0.75rem', sm: '0.8rem' },
-                    }}
-                  />
-                </ListItem>
-              ))}
-            </List>
+                      fontSize: { xs: '0.9rem', sm: '1rem' },
+                    }
+                  }}
+                >
+                  <Box display="flex" alignItems="center" gap={{ xs: 1, sm: 1.5 }} flexWrap="wrap">
+                    <Typography variant="subtitle1" fontWeight="bold" sx={{
+                      fontSize: { xs: '0.85rem', sm: '0.95rem' },
+                      lineHeight: { xs: 1.2, sm: 1.4 }
+                    }}>
+                      {day.day} - {day.city}
+                    </Typography>
+                    <Chip
+                      label={day.date}
+                      size="small"
+                      color="primary"
+                      variant="outlined"
+                      sx={{
+                        fontWeight: 'bold',
+                        fontSize: { xs: '0.65rem', sm: '0.75rem' },
+                        '&:hover': { bgcolor: 'primary.light', color: 'white' },
+                        transition: 'all 0.3s ease',
+                      }}
+                    />
+                  </Box>
+                </StepLabel>
+                <StepContent>
+                  <Collapse in={selectedDay === index} timeout={500}>
+                    <Card
+                      elevation={selectedDay === index ? 6 : 2}
+                      sx={{
+                        p: { xs: 1.5, sm: 2 },
+                        border: selectedDay === index ? 2 : 0,
+                        borderColor: 'primary.main',
+                        borderRadius: { xs: 1.5, sm: 2 },
+                        transition: 'all 0.5s ease',
+                        mb: { xs: 1, sm: 1.5 },
+                        background: selectedDay === index
+                          ? `linear-gradient(135deg, ${theme.palette.primary.light}10, ${theme.palette.background.paper})`
+                          : 'background.paper',
+                      }}
+                    >
+                      {/* Flight Information */}
+                      {day.flightNote && (
+                        <Fade in={selectedDay === index} timeout={800}>
+                          <Box sx={{ mb: { xs: 1.5, sm: 2 } }}>
+                            <Box display="flex" alignItems="center" gap={{ xs: 1, sm: 1.5 }} mb={{ xs: 1, sm: 1.5 }}>
+                              <Avatar sx={{ bgcolor: 'info.main', width: { xs: 24, sm: 28 }, height: { xs: 24, sm: 28 } }}>
+                                <FlightIcon sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }} />
+                              </Avatar>
+                              <Typography variant="subtitle2" fontWeight="bold" color="info.main" sx={{
+                                fontSize: { xs: '0.8rem', sm: '0.875rem' }
+                              }}>
+                                FLIGHT
+                              </Typography>
+                            </Box>
+                            <Paper
+                              elevation={2}
+                              sx={{
+                                p: { xs: 1.5, sm: 2 },
+                                bgcolor: 'info.50',
+                                borderRadius: { xs: 1, sm: 1.5 },
+                                border: `1px solid ${theme.palette.info.light}`,
+                              }}
+                            >
+                              <Typography variant="body2" color="info.main" sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 1,
+                                fontSize: { xs: '0.75rem', sm: '0.8rem' }
+                              }}>
+                                <InfoIcon sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }} />
+                                {day.flightNote}
+                              </Typography>
+                            </Paper>
+                          </Box>
+                        </Fade>
+                      )}
 
-            <Divider sx={{ my: { xs: 1, sm: 1.5 } }} />
+                      {/* Hotel Information */}
+                      {day.hotel && (
+                        <Fade in={selectedDay === index} timeout={1000}>
+                          <Box>
+                            <Box display="flex" alignItems="center" gap={{ xs: 1, sm: 1.5 }} mb={{ xs: 1, sm: 1.5 }}>
+                              <Avatar sx={{ bgcolor: 'success.main', width: { xs: 24, sm: 28 }, height: { xs: 24, sm: 28 } }}>
+                                <HotelIcon sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }} />
+                              </Avatar>
+                              <Typography variant="subtitle2" fontWeight="bold" color="success.main" sx={{
+                                fontSize: { xs: '0.8rem', sm: '0.875rem' }
+                              }}>
+                                HOTEL
+                              </Typography>
+                            </Box>
+                            <Paper elevation={3} sx={{ p: { xs: 1.5, sm: 2 }, borderRadius: { xs: 1, sm: 1.5 } }}>
+                              <Grid container spacing={{ xs: 1.5, sm: 2 }}>
+                                <Grid size={{ xs: 12, md: 8 }}>
+                                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{
+                                    fontSize: { xs: '0.85rem', sm: '0.95rem' }
+                                  }}>
+                                    {day.hotel.name}
+                                  </Typography>
+                                  <Box display="flex" alignItems="center" gap={1} mb={{ xs: 1, sm: 1.5 }}>
+                                    <Rating value={day.hotel.stars} readOnly size="small" />
+                                    <Typography variant="body2" fontWeight="bold" sx={{
+                                      fontSize: { xs: '0.7rem', sm: '0.8rem' }
+                                    }}>
+                                      ({day.hotel.rating})
+                                    </Typography>
+                                  </Box>
+                                  <Typography variant="body2" color="text.secondary" gutterBottom sx={{
+                                    fontSize: { xs: '0.7rem', sm: '0.8rem' }
+                                  }}>
+                                    📍 {day.hotel.location}
+                                  </Typography>
+                                  <Typography variant="body2" fontWeight="bold" gutterBottom sx={{
+                                    fontSize: { xs: '0.7rem', sm: '0.8rem' }
+                                  }}>
+                                    🛏️ {day.hotel.stay}
+                                  </Typography>
+                                  <Typography variant="body2" gutterBottom sx={{
+                                    fontSize: { xs: '0.7rem', sm: '0.8rem' }
+                                  }}>
+                                    🏨 {day.hotel.type}
+                                  </Typography>
+                                  <Box sx={{ mt: { xs: 1, sm: 1.5 } }}>
+                                    {day.hotel.inclusions.map((inclusion, idx) => (
+                                      <Chip
+                                        key={idx}
+                                        label={inclusion}
+                                        size="small"
+                                        color="success"
+                                        variant="outlined"
+                                        sx={{
+                                          mr: { xs: 0.25, sm: 0.5 },
+                                          mb: { xs: 0.25, sm: 0.5 },
+                                          fontSize: { xs: '0.65rem', sm: '0.7rem' },
+                                          '&:hover': { bgcolor: 'success.light', color: 'white' },
+                                          transition: 'all 0.3s ease',
+                                        }}
+                                      />
+                                    ))}
+                                  </Box>
+                                </Grid>
+                                <Grid size={{ xs: 12, md: 4 }}>
+                                  <Card elevation={2} sx={{ borderRadius: { xs: 1, sm: 1.5 }, overflow: 'hidden' }}>
+                                    <CardMedia
+                                      component="img"
+                                      height={{ xs: 80, sm: 100 }}
+                                      image={day.hotel.image || '/api/placeholder/150/120'}
+                                      alt={day.hotel.name}
+                                      sx={{
+                                        transition: 'transform 0.3s ease',
+                                        '&:hover': { transform: 'scale(1.1)' },
+                                      }}
+                                    />
+                                  </Card>
+                                </Grid>
+                              </Grid>
+                            </Paper>
+                          </Box>
+                        </Fade>
+                      )}
+                    </Card>
+                  </Collapse>
+                </StepContent>
+              </Step>
+            ))}
+          </Stepper>
+        </Grid>
 
-            {/* Enhanced Best Deals Section */}
-            <Box sx={{ p: { xs: 1.5, sm: 2 } }}>
-              <Paper
-                elevation={3}
+        {/* Enhanced Sidebar */}
+        {packageData.sidebar && (
+          <Grid size={{ xs: 12, md: 3 }}>
+            <Card
+              elevation={4}
+              sx={{
+                position: 'sticky',
+                top: { xs: 80, sm: 100 },
+                borderRadius: { xs: 1.5, sm: 2 },
+                overflow: 'hidden',
+              }}
+            >
+              <Box
                 sx={{
+                  background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
                   p: { xs: 1.5, sm: 2 },
-                  background: `linear-gradient(135deg, ${theme.palette.success.light}20, ${theme.palette.success.main}20)`,
-                  border: `1px solid ${theme.palette.success.light}`,
-                  borderRadius: { xs: 1, sm: 1.5 },
+                  color: 'white',
                 }}
               >
-                <Box display="flex" alignItems="center" gap={1} mb={{ xs: 1, sm: 1.5 }}>
-                  <OfferIcon color="success" sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }} />
-                  <Typography variant="subtitle2" fontWeight="bold" color="success.main" sx={{
-                    fontSize: { xs: '0.8rem', sm: '0.875rem' }
-                  }}>
-                    {packageData.sidebar?.bestDeals?.message}
-                  </Typography>
-                </Box>
-                <Stack spacing={{ xs: 0.75, sm: 1 }}>
-                  {packageData.sidebar?.bestDeals?.actions?.map((action, index) => (
-                    <Box key={index} display="flex" alignItems="center" gap={1}>
-                      <CheckIcon
-                        color="success"
-                        sx={{
-                          p: 0.2,
-                          bgcolor: 'success.main',
-                          borderRadius: '50%',
-                          color: 'white',
-                          fontSize: { xs: '0.65rem', sm: '0.75rem' },
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom sx={{
+                  fontSize: { xs: '0.85rem', sm: '0.95rem' }
+                }}>
+                  Trip Timeline
+                </Typography>
+                <Typography variant="body2" sx={{
+                  opacity: 0.9,
+                  fontSize: { xs: '0.7rem', sm: '0.8rem' }
+                }}>
+                  Click on any day to view details
+                </Typography>
+              </Box>
+              <CardContent sx={{ p: 0 }}>
+                <List dense>
+                  {packageData.sidebar?.days?.map((date, index) => (
+                    <ListItem
+                      key={index}
+                      button
+                      selected={selectedDay === index}
+                      onClick={() => handleDaySelect(index)}
+                      sx={{
+                        py: { xs: 1, sm: 1.5 },
+                        px: { xs: 1.5, sm: 2 },
+                        borderLeft: selectedDay === index ? 3 : 0,
+                        borderColor: 'primary.main',
+                        bgcolor: selectedDay === index ? 'primary.50' : 'transparent',
+                        '&:hover': {
+                          bgcolor: 'primary.100',
+                        },
+                        transition: 'all 0.3s ease',
+                      }}
+                    >
+                      <ListItemIcon>
+                        <Avatar
+                          sx={{
+                            width: { xs: 24, sm: 28 },
+                            height: { xs: 24, sm: 28 },
+                            bgcolor: selectedDay === index ? 'primary.main' : 'grey.300',
+                            color: selectedDay === index ? 'white' : 'grey.600',
+                            fontSize: { xs: '0.65rem', sm: '0.75rem' },
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          {index + 1}
+                        </Avatar>
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={date}
+                        primaryTypographyProps={{
+                          fontWeight: selectedDay === index ? 'bold' : 'normal',
+                          color: selectedDay === index ? 'primary.main' : 'text.primary',
+                          fontSize: { xs: '0.75rem', sm: '0.8rem' },
                         }}
                       />
-                      <Typography variant="body2" sx={{
-                        flex: 1,
-                        fontSize: { xs: '0.7rem', sm: '0.75rem' }
+                    </ListItem>
+                  ))}
+                </List>
+
+                <Divider sx={{ my: { xs: 1, sm: 1.5 } }} />
+
+                {/* Enhanced Best Deals Section */}
+                <Box sx={{ p: { xs: 1.5, sm: 2 } }}>
+                  <Paper
+                    elevation={3}
+                    sx={{
+                      p: { xs: 1.5, sm: 2 },
+                      background: `linear-gradient(135deg, ${theme.palette.success.light}20, ${theme.palette.success.main}20)`,
+                      border: `1px solid ${theme.palette.success.light}`,
+                      borderRadius: { xs: 1, sm: 1.5 },
+                    }}
+                  >
+                    <Box display="flex" alignItems="center" gap={1} mb={{ xs: 1, sm: 1.5 }}>
+                      <OfferIcon color="success" sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }} />
+                      <Typography variant="subtitle2" fontWeight="bold" color="success.main" sx={{
+                        fontSize: { xs: '0.8rem', sm: '0.875rem' }
                       }}>
-                        {action}
+                        {packageData.sidebar?.bestDeals?.message}
                       </Typography>
                     </Box>
-                  ))}
-                </Stack>
-              </Paper>
-            </Box>
-          </CardContent>
-        </Card>
+                    <Stack spacing={{ xs: 0.75, sm: 1 }}>
+                      {packageData.sidebar?.bestDeals?.actions?.map((action, index) => (
+                        <Box key={index} display="flex" alignItems="center" gap={1}>
+                          <CheckIcon
+                            color="success"
+                            sx={{
+                              p: 0.2,
+                              bgcolor: 'success.main',
+                              borderRadius: '50%',
+                              color: 'white',
+                              fontSize: { xs: '0.65rem', sm: '0.75rem' },
+                            }}
+                          />
+                          <Typography variant="body2" sx={{
+                            flex: 1,
+                            fontSize: { xs: '0.7rem', sm: '0.75rem' }
+                          }}>
+                            {action}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Stack>
+                  </Paper>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
       </Grid>
-      )}
-    </Grid>
     );
   };
 
@@ -1702,7 +1700,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       </Box>
 
       <Grid container spacing={{ xs: 2, sm: 3 }}>
-        <Grid size={{xs: 12, md: 6}}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ p: { xs: 2, sm: 2.5 }, height: '100%', borderRadius: { xs: 1, sm: 1.5 } }}>
             <Typography variant="subtitle1" fontWeight="bold" gutterBottom color="error.main" sx={{ fontSize: { xs: '0.9rem', sm: '0.95rem' } }}>
               Cancellation Policy
@@ -1730,7 +1728,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
           </Card>
         </Grid>
 
-        <Grid size={{xs: 12, md: 6}}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ p: { xs: 2, sm: 2.5 }, height: '100%', borderRadius: { xs: 1, sm: 1.5 } }}>
             <Typography variant="subtitle1" fontWeight="bold" gutterBottom color="success.main" sx={{ fontSize: { xs: '0.9rem', sm: '0.95rem' } }}>
               Payment Policy
@@ -1788,7 +1786,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       </Box>
 
       <Grid container spacing={{ xs: 2, sm: 3 }}>
-        <Grid size={{xs: 12, md: 6}}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card
             elevation={2}
             sx={{
@@ -1829,7 +1827,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
           </Card>
         </Grid>
 
-        <Grid size={{xs: 12, md: 6}}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Card
             elevation={2}
             sx={{
@@ -1888,7 +1886,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
             </Typography>
             <Grid container spacing={{ xs: 1.5, sm: 2 }}>
               {selectedActivities.map((activity, index) => (
-                <Grid size={{xs: 12, sm: 6}} key={activity.id || index}>
+                <Grid size={{ xs: 12, sm: 6 }} key={activity.id || index}>
                   <Card
                     elevation={1}
                     sx={{
@@ -1942,7 +1940,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
 
       <Box sx={{ mt: { xs: 2, sm: 3 } }}>
         <Grid container spacing={{ xs: 1.5, sm: 2 }}>
-          <Grid size={{xs: 12, sm: 4}}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <Card elevation={2} sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center', borderRadius: { xs: 1, sm: 1.5 } }}>
               <PhoneIcon color="primary" sx={{ fontSize: { xs: 28, sm: 32 }, mb: 1 }} />
               <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
@@ -1953,7 +1951,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
               </Typography>
             </Card>
           </Grid>
-          <Grid size={{xs: 12, sm: 4}}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <Card elevation={2} sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center', borderRadius: { xs: 1, sm: 1.5 } }}>
               <SecurityIcon color="success" sx={{ fontSize: { xs: 28, sm: 32 }, mb: 1 }} />
               <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
@@ -1964,7 +1962,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
               </Typography>
             </Card>
           </Grid>
-            <Grid size={{xs: 12, sm: 4}}>
+          <Grid size={{ xs: 12, sm: 4 }}>
             <Card elevation={2} sx={{ p: { xs: 1.5, sm: 2 }, textAlign: 'center', borderRadius: { xs: 1, sm: 1.5 } }}>
               <StarIcon color="warning" sx={{ fontSize: { xs: 28, sm: 32 }, mb: 1 }} />
               <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
@@ -2274,7 +2272,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
                   <Typography variant="body2" color="text.secondary">Duration:</Typography>
                   <Typography variant="body2">{packageData.duration}</Typography>
                 </Box>
-                
+
                 {/* Selected Activities */}
                 {selectedActivities.length > 0 && (
                   <>
@@ -2315,7 +2313,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
                     <Divider sx={{ my: 1 }} />
                   </>
                 )}
-                
+
                 <Box display="flex" justifyContent="space-between" alignItems="center">
                   <Typography variant="body2" color="text.secondary">Original Price:</Typography>
                   <Typography variant="body2" sx={{ textDecoration: 'line-through' }}>
@@ -2361,314 +2359,314 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
 
         {/* Step 1: Payment Details */}
         {paymentStep === 1 && (
-        <Grid container spacing={3}>
-          {/* Order Summary - First on mobile */}
-          <Grid size={{xs: 12, md: 4}} sx={{ order: { xs: 1, md: 2 } }}>
-            <Paper elevation={3} sx={{ p: { xs: 2, sm: 3 }, borderRadius: { xs: 1, sm: 2 }, height: 'fit-content', position: 'sticky', top: 20 }}>
-              <Box display="flex" alignItems="center" gap={2} mb={3}>
-                <VerifiedUserIcon color="success" sx={{ fontSize: { xs: 28, sm: 32 } }} />
-                <Typography variant="h6" fontWeight="bold" sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
-                  Order Summary
-                </Typography>
-              </Box>
-
-              <Stack spacing={2}>
-                <Divider />
-                <Box display="flex" justifyContent="space-between" alignItems="center">
-                  <Typography variant="h6" fontWeight="bold">Total Amount:</Typography>
-                  <Typography variant="h6" fontWeight="bold" color="primary.main">
-                    £{packageData.price.discounted.toLocaleString()}
-                  </Typography>
-                </Box>
-
-                <Box
-                  sx={{
-                    bgcolor: 'success.50',
-                    p: 2,
-                    borderRadius: 1,
-                    border: `1px solid ${theme.palette.success.light}`,
-                  }}
-                >
-                  <Typography variant="body2" color="success.main" fontWeight="bold" textAlign="center">
-                    🎉 You Save £{(packageData.price.original - packageData.price.discounted).toLocaleString()}
-                  </Typography>
-                </Box>
-
-                <Box display="flex" alignItems="center" gap={1} justifyContent="center">
-                  <SecurityIcon color="success" fontSize="small" />
-                  <Typography variant="caption" color="text.secondary">
-                    Secure payment powered by Stripe
-                  </Typography>
-                </Box>
-              </Stack>
-            </Paper>
-          </Grid>
-
-          {/* Payment Form - Second on mobile */}
-          <Grid size={{xs: 12, md: 8}} sx={{ order: { xs: 2, md: 1 } }}>
-            <Paper elevation={3} sx={{ p: { xs: 2, sm: 3 }, borderRadius: { xs: 1, sm: 2 } }}>
-              <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
-                <Box display="flex" alignItems="center" gap={2}>
-                  <CreditCardIcon color="primary" sx={{ fontSize: { xs: 28, sm: 32 } }} />
+          <Grid container spacing={3}>
+            {/* Order Summary - First on mobile */}
+            <Grid size={{ xs: 12, md: 4 }} sx={{ order: { xs: 1, md: 2 } }}>
+              <Paper elevation={3} sx={{ p: { xs: 2, sm: 3 }, borderRadius: { xs: 1, sm: 2 }, height: 'fit-content', position: 'sticky', top: 20 }}>
+                <Box display="flex" alignItems="center" gap={2} mb={3}>
+                  <VerifiedUserIcon color="success" sx={{ fontSize: { xs: 28, sm: 32 } }} />
                   <Typography variant="h6" fontWeight="bold" sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
-                    Card Details
+                    Order Summary
                   </Typography>
                 </Box>
-                {userType === 'agent' && paymentFormFilledBy === 'customer' && (
-                  <Chip
-                    icon={<LockIcon />}
-                    label="Customer's Private Data"
-                    color="warning"
-                    size="small"
-                    sx={{ fontWeight: 'bold' }}
-                  />
-                )}
-              </Box>
 
-              <Grid container spacing={2}>
-                {/* Card Number */}
-                <Grid size={{xs: 12}}>
-                  <TextField
-                    fullWidth
-                    label="Card Number"
-                    placeholder="1234 5678 9012 3456"
-                    variant="outlined"
-                    size="small"
-                    value={getMaskedValue('cardNumber', paymentFormData.cardNumber)}
-                    onChange={(e) => handlePaymentFieldChange('cardNumber', e.target.value)}
-                    disabled={shouldBlurField('cardNumber')}
-                    InputProps={{
-                      startAdornment: <CreditCardIcon sx={{ mr: 1, color: 'text.secondary' }} />,
-                    }}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        '&:hover fieldset': {
-                          borderColor: 'primary.main',
-                        },
-                        filter: shouldBlurField('cardNumber') ? 'blur(4px)' : 'none',
-                        transition: 'filter 0.3s ease',
-                      },
-                      '& .MuiInputBase-input': {
-                        cursor: shouldBlurField('cardNumber') ? 'not-allowed' : 'text',
-                      },
-                    }}
-                  />
-                </Grid>
-
-                {/* Cardholder Name */}
-                <Grid size={{xs: 12}}>
-                  <TextField
-                    fullWidth
-                    label="Cardholder Name"
-                    placeholder="John Doe"
-                    variant="outlined"
-                    size="small"
-                    value={paymentFormData.cardHolderName}
-                    onChange={(e) => handlePaymentFieldChange('cardHolderName', e.target.value)}
-                    InputProps={{
-                      startAdornment: <AccountIcon sx={{ mr: 1, color: 'text.secondary' }} />,
-                    }}
-                  />
-                </Grid>
-
-                {/* Expiry Date and CVV */}
-                <Grid size={{xs: 12, sm: 6}}>
-                  <TextField
-                    fullWidth
-                    label="Expiry Date"
-                    placeholder="MM/YY"
-                    variant="outlined"
-                    size="small"
-                    value={getMaskedValue('expiryDate', paymentFormData.expiryDate)}
-                    onChange={(e) => handlePaymentFieldChange('expiryDate', e.target.value)}
-                    disabled={shouldBlurField('expiryDate')}
-                    InputProps={{
-                      startAdornment: <CalendarIcon sx={{ mr: 1, color: 'text.secondary' }} />,
-                    }}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        filter: shouldBlurField('expiryDate') ? 'blur(4px)' : 'none',
-                        transition: 'filter 0.3s ease',
-                      },
-                    }}
-                  />
-                </Grid>
-
-                <Grid size={{xs: 12, sm: 6}}>
-                  <TextField
-                    fullWidth
-                    label="CVV"
-                    placeholder="123"
-                    variant="outlined"
-                    size="small"
-                    type="password"
-                    value={getMaskedValue('cvv', paymentFormData.cvv)}
-                    onChange={(e) => handlePaymentFieldChange('cvv', e.target.value)}
-                    disabled={shouldBlurField('cvv')}
-                    InputProps={{
-                      startAdornment: <LockIcon sx={{ mr: 1, color: 'text.secondary' }} />,
-                    }}
-                    sx={{
-                      '& .MuiOutlinedInput-root': {
-                        filter: shouldBlurField('cvv') ? 'blur(4px)' : 'none',
-                        transition: 'filter 0.3s ease',
-                      },
-                    }}
-                  />
-                </Grid>
-
-                {/* Billing Address */}
-                <Grid size={{xs: 12}}>
-                  <Divider sx={{ my: 2 }}>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      Billing Address
+                <Stack spacing={2}>
+                  <Divider />
+                  <Box display="flex" justifyContent="space-between" alignItems="center">
+                    <Typography variant="h6" fontWeight="bold">Total Amount:</Typography>
+                    <Typography variant="h6" fontWeight="bold" color="primary.main">
+                      £{packageData.price.discounted.toLocaleString()}
                     </Typography>
-                  </Divider>
-                </Grid>
+                  </Box>
 
-                <Grid size={{xs: 12}}>
-                  <TextField
-                    fullWidth
-                    label="Street Address"
-                    placeholder="123 Main Street"
-                    variant="outlined"
-                    size="small"
-                    value={paymentFormData.address}
-                    onChange={(e) => handlePaymentFieldChange('address', e.target.value)}
-                    InputProps={{
-                      startAdornment: <HomeIcon sx={{ mr: 1, color: 'text.secondary' }} />,
-                    }}
-                  />
-                </Grid>
-
-                <Grid size={{xs: 12, sm: 6}}>
-                  <TextField
-                    fullWidth
-                    label="City"
-                    placeholder="New York"
-                    variant="outlined"
-                    size="small"
-                    value={paymentFormData.city}
-                    onChange={(e) => handlePaymentFieldChange('city', e.target.value)}
-                  />
-                </Grid>
-
-                <Grid size={{xs: 12, sm: 6}}>
-                  <TextField
-                    fullWidth
-                    label="State/Province"
-                    placeholder="NY"
-                    variant="outlined"
-                    size="small"
-                    value={paymentFormData.state}
-                    onChange={(e) => handlePaymentFieldChange('state', e.target.value)}
-                  />
-                </Grid>
-
-                <Grid size={{xs: 12, sm: 6}}>
-                  <TextField
-                    fullWidth
-                    label="ZIP/Postal Code"
-                    placeholder="10001"
-                    variant="outlined"
-                    size="small"
-                    value={paymentFormData.zipCode}
-                    onChange={(e) => handlePaymentFieldChange('zipCode', e.target.value)}
-                  />
-                </Grid>
-
-                <Grid size={{xs: 12, sm: 6}}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Country</InputLabel>
-                    <Select
-                      label="Country"
-                      value={paymentFormData.country}
-                      onChange={(e) => handlePaymentFieldChange('country', e.target.value)}
-                    >
-                      <MenuItem value="US">United States</MenuItem>
-                      <MenuItem value="CA">Canada</MenuItem>
-                      <MenuItem value="UK">United Kingdom</MenuItem>
-                      <MenuItem value="IN">India</MenuItem>
-                      <MenuItem value="AU">Australia</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                {/* Privacy Notice */}
-                {userType === 'agent' && paymentFormFilledBy === 'customer' && (
-                  <Grid size={{xs: 12}}>
-                    <Alert severity="info" icon={<LockIcon />} sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
-                      <Typography variant="body2" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
-                        🔒 <strong>Privacy Protected:</strong> Customer is entering their payment details. Sensitive card information (Card Number, CVV, Expiry Date) is hidden for security.
-                      </Typography>
-                    </Alert>
-                  </Grid>
-                )}
-
-                {/* Terms and Conditions */}
-                <Grid size={{xs: 12}}>
-                  <FormControlLabel
-                    control={
-                      <Checkbox
-                        color="primary"
-                        checked={paymentFormData.agreeToTerms}
-                        onChange={(e) => handlePaymentFieldChange('agreeToTerms', e.target.checked)}
-                      />
-                    }
-                    label={
-                      <Typography variant="body2" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
-                        I agree to the{' '}
-                        <Typography component="span" color="primary" sx={{ textDecoration: 'underline', cursor: 'pointer' }}>
-                          Terms & Conditions
-                        </Typography>{' '}
-                        and{' '}
-                        <Typography component="span" color="primary" sx={{ textDecoration: 'underline', cursor: 'pointer' }}>
-                          Privacy Policy
-                        </Typography>
-                      </Typography>
-                    }
-                  />
-                </Grid>
-                <Box display="flex" gap={2} mb={1} sx={{ width: '100%' }}>
-                  <Button
-                    variant="outlined"
-                    size="large"
-                    onClick={handleBackToSummary}
-                    sx={{ flex: 1 }}
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    variant="contained"
-                    size="large"
-                    onClick={() => {
-                      if (!paymentFormData.agreeToTerms) {
-                        setPaymentError(true);
-                        return;
-                      }
-                      sendPaymentAction('payment-button-click', { action: 'payment-button-click', button: 'pay' });
-                      handlePaymentSuccess();
-                    }}
+                  <Box
                     sx={{
-                      flex: 2,
-                      py: 1.5,
-                      fontSize: { xs: '1rem', sm: '1.1rem' },
-                      fontWeight: 'bold',
-                      background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
-                      '&:hover': {
-                        transform: 'scale(1.02)',
-                        boxShadow: theme.shadows[8],
-                      },
-                      transition: 'all 0.3s ease',
+                      bgcolor: 'success.50',
+                      p: 2,
+                      borderRadius: 1,
+                      border: `1px solid ${theme.palette.success.light}`,
                     }}
                   >
-                    💳 Pay £{packageData.price.discounted.toLocaleString()}
-                  </Button>
+                    <Typography variant="body2" color="success.main" fontWeight="bold" textAlign="center">
+                      🎉 You Save £{(packageData.price.original - packageData.price.discounted).toLocaleString()}
+                    </Typography>
+                  </Box>
+
+                  <Box display="flex" alignItems="center" gap={1} justifyContent="center">
+                    <SecurityIcon color="success" fontSize="small" />
+                    <Typography variant="caption" color="text.secondary">
+                      Secure payment powered by Stripe
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Paper>
+            </Grid>
+
+            {/* Payment Form - Second on mobile */}
+            <Grid size={{ xs: 12, md: 8 }} sx={{ order: { xs: 2, md: 1 } }}>
+              <Paper elevation={3} sx={{ p: { xs: 2, sm: 3 }, borderRadius: { xs: 1, sm: 2 } }}>
+                <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
+                  <Box display="flex" alignItems="center" gap={2}>
+                    <CreditCardIcon color="primary" sx={{ fontSize: { xs: 28, sm: 32 } }} />
+                    <Typography variant="h6" fontWeight="bold" sx={{ fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
+                      Card Details
+                    </Typography>
+                  </Box>
+                  {userType === 'agent' && paymentFormFilledBy === 'customer' && (
+                    <Chip
+                      icon={<LockIcon />}
+                      label="Customer's Private Data"
+                      color="warning"
+                      size="small"
+                      sx={{ fontWeight: 'bold' }}
+                    />
+                  )}
                 </Box>
-              </Grid>
-            </Paper>
+
+                <Grid container spacing={2}>
+                  {/* Card Number */}
+                  <Grid size={{ xs: 12 }}>
+                    <TextField
+                      fullWidth
+                      label="Card Number"
+                      placeholder="1234 5678 9012 3456"
+                      variant="outlined"
+                      size="small"
+                      value={getMaskedValue('cardNumber', paymentFormData.cardNumber)}
+                      onChange={(e) => handlePaymentFieldChange('cardNumber', e.target.value)}
+                      disabled={shouldBlurField('cardNumber')}
+                      InputProps={{
+                        startAdornment: <CreditCardIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                      }}
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          '&:hover fieldset': {
+                            borderColor: 'primary.main',
+                          },
+                          filter: shouldBlurField('cardNumber') ? 'blur(4px)' : 'none',
+                          transition: 'filter 0.3s ease',
+                        },
+                        '& .MuiInputBase-input': {
+                          cursor: shouldBlurField('cardNumber') ? 'not-allowed' : 'text',
+                        },
+                      }}
+                    />
+                  </Grid>
+
+                  {/* Cardholder Name */}
+                  <Grid size={{ xs: 12 }}>
+                    <TextField
+                      fullWidth
+                      label="Cardholder Name"
+                      placeholder="John Doe"
+                      variant="outlined"
+                      size="small"
+                      value={paymentFormData.cardHolderName}
+                      onChange={(e) => handlePaymentFieldChange('cardHolderName', e.target.value)}
+                      InputProps={{
+                        startAdornment: <AccountIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                      }}
+                    />
+                  </Grid>
+
+                  {/* Expiry Date and CVV */}
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      fullWidth
+                      label="Expiry Date"
+                      placeholder="MM/YY"
+                      variant="outlined"
+                      size="small"
+                      value={getMaskedValue('expiryDate', paymentFormData.expiryDate)}
+                      onChange={(e) => handlePaymentFieldChange('expiryDate', e.target.value)}
+                      disabled={shouldBlurField('expiryDate')}
+                      InputProps={{
+                        startAdornment: <CalendarIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                      }}
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          filter: shouldBlurField('expiryDate') ? 'blur(4px)' : 'none',
+                          transition: 'filter 0.3s ease',
+                        },
+                      }}
+                    />
+                  </Grid>
+
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      fullWidth
+                      label="CVV"
+                      placeholder="123"
+                      variant="outlined"
+                      size="small"
+                      type="password"
+                      value={getMaskedValue('cvv', paymentFormData.cvv)}
+                      onChange={(e) => handlePaymentFieldChange('cvv', e.target.value)}
+                      disabled={shouldBlurField('cvv')}
+                      InputProps={{
+                        startAdornment: <LockIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                      }}
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          filter: shouldBlurField('cvv') ? 'blur(4px)' : 'none',
+                          transition: 'filter 0.3s ease',
+                        },
+                      }}
+                    />
+                  </Grid>
+
+                  {/* Billing Address */}
+                  <Grid size={{ xs: 12 }}>
+                    <Divider sx={{ my: 2 }}>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Billing Address
+                      </Typography>
+                    </Divider>
+                  </Grid>
+
+                  <Grid size={{ xs: 12 }}>
+                    <TextField
+                      fullWidth
+                      label="Street Address"
+                      placeholder="123 Main Street"
+                      variant="outlined"
+                      size="small"
+                      value={paymentFormData.address}
+                      onChange={(e) => handlePaymentFieldChange('address', e.target.value)}
+                      InputProps={{
+                        startAdornment: <HomeIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                      }}
+                    />
+                  </Grid>
+
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      fullWidth
+                      label="City"
+                      placeholder="New York"
+                      variant="outlined"
+                      size="small"
+                      value={paymentFormData.city}
+                      onChange={(e) => handlePaymentFieldChange('city', e.target.value)}
+                    />
+                  </Grid>
+
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      fullWidth
+                      label="State/Province"
+                      placeholder="NY"
+                      variant="outlined"
+                      size="small"
+                      value={paymentFormData.state}
+                      onChange={(e) => handlePaymentFieldChange('state', e.target.value)}
+                    />
+                  </Grid>
+
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <TextField
+                      fullWidth
+                      label="ZIP/Postal Code"
+                      placeholder="10001"
+                      variant="outlined"
+                      size="small"
+                      value={paymentFormData.zipCode}
+                      onChange={(e) => handlePaymentFieldChange('zipCode', e.target.value)}
+                    />
+                  </Grid>
+
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>Country</InputLabel>
+                      <Select
+                        label="Country"
+                        value={paymentFormData.country}
+                        onChange={(e) => handlePaymentFieldChange('country', e.target.value)}
+                      >
+                        <MenuItem value="US">United States</MenuItem>
+                        <MenuItem value="CA">Canada</MenuItem>
+                        <MenuItem value="UK">United Kingdom</MenuItem>
+                        <MenuItem value="IN">India</MenuItem>
+                        <MenuItem value="AU">Australia</MenuItem>
+                      </Select>
+                    </FormControl>
+                  </Grid>
+
+                  {/* Privacy Notice */}
+                  {userType === 'agent' && paymentFormFilledBy === 'customer' && (
+                    <Grid size={{ xs: 12 }}>
+                      <Alert severity="info" icon={<LockIcon />} sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                        <Typography variant="body2" sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                          🔒 <strong>Privacy Protected:</strong> Customer is entering their payment details. Sensitive card information (Card Number, CVV, Expiry Date) is hidden for security.
+                        </Typography>
+                      </Alert>
+                    </Grid>
+                  )}
+
+                  {/* Terms and Conditions */}
+                  <Grid size={{ xs: 12 }}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          color="primary"
+                          checked={paymentFormData.agreeToTerms}
+                          onChange={(e) => handlePaymentFieldChange('agreeToTerms', e.target.checked)}
+                        />
+                      }
+                      label={
+                        <Typography variant="body2" sx={{ fontSize: { xs: '0.8rem', sm: '0.875rem' } }}>
+                          I agree to the{' '}
+                          <Typography component="span" color="primary" sx={{ textDecoration: 'underline', cursor: 'pointer' }}>
+                            Terms & Conditions
+                          </Typography>{' '}
+                          and{' '}
+                          <Typography component="span" color="primary" sx={{ textDecoration: 'underline', cursor: 'pointer' }}>
+                            Privacy Policy
+                          </Typography>
+                        </Typography>
+                      }
+                    />
+                  </Grid>
+                  <Box display="flex" gap={2} mb={1} sx={{ width: '100%' }}>
+                    <Button
+                      variant="outlined"
+                      size="large"
+                      onClick={handleBackToSummary}
+                      sx={{ flex: 1 }}
+                    >
+                      Back
+                    </Button>
+                    <Button
+                      variant="contained"
+                      size="large"
+                      onClick={() => {
+                        if (!paymentFormData.agreeToTerms) {
+                          setPaymentError(true);
+                          return;
+                        }
+                        sendPaymentAction('payment-button-click', { action: 'payment-button-click', button: 'pay' });
+                        handlePaymentSuccess();
+                      }}
+                      sx={{
+                        flex: 2,
+                        py: 1.5,
+                        fontSize: { xs: '1rem', sm: '1.1rem' },
+                        fontWeight: 'bold',
+                        background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+                        '&:hover': {
+                          transform: 'scale(1.02)',
+                          boxShadow: theme.shadows[8],
+                        },
+                        transition: 'all 0.3s ease',
+                      }}
+                    >
+                      💳 Pay £{packageData.price.discounted.toLocaleString()}
+                    </Button>
+                  </Box>
+                </Grid>
+              </Paper>  
+            </Grid>  
           </Grid>
-        </Grid>
         )}
 
         {/* Step 2: Thank You Page */}
@@ -2737,13 +2735,14 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
 
             <DialogContent
               ref={scrollRef}
+              id={`package-details-scroll-${userType}`}
               sx={{
                 p: 0,
                 height: 'calc(100vh - 100px)',
                 overflow: 'auto',
                 scrollBehavior: 'smooth',
                 // Add visual indicator when this side is actively controlling
-                borderLeft: isActiveController ? '4px solid' : 'none',
+                borderLeft: isLeader ? '4px solid' : 'none',
                 borderColor: 'primary.main',
               }}
             >
@@ -2752,7 +2751,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
                 {renderHighlightsBadges()}
 
                 <Grid container spacing={3}>
-                  <Grid size={{xs: 12, lg: 12}}>
+                  <Grid size={{ xs: 12, lg: 12 }}>
                     {renderTabSection()}
                   </Grid>
                 </Grid>

@@ -12,5 +12,5 @@ const PORT = process.env.PORT || 3040;
 // };
 
 http.createServer(app).listen(PORT, () => {
-  console.log(`✅ HTTPS Server is running at http://localhost:${PORT}`);
+  console.log(`✅ HTTP Server is running at http://localhost:${PORT}`);
 });

@@ -25,7 +25,7 @@ import {
   CompareArrows as CompareIcon,
   Compare as CompareActiveIcon,
 } from "@mui/icons-material";
-import { useCoBrowseScrollSync } from "../hooks/useCoBrowseScrollSync";
+import { useEnhancedScrollSync } from "../hooks/useEnhancedScrollSync";
 import { samplePackageData } from "../data/samplePackageData";
 import PackageDetailsModal from "./PackageDetailsModal";
 
@@ -76,8 +76,8 @@ const AgentCatalog = ({
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState(null);
 
-  // Co-browse scroll sync hook
-  const { scrollRef, isActiveController } = useCoBrowseScrollSync('agent', true, 'catalog');
+  // Enhanced scroll sync hook (unified container id across agent/customer shared lists)
+  const { scrollRef, isLeader: isActiveController } = useEnhancedScrollSync({ containerId: 'shared-packages', userType: 'agent', enabled: true, throttleMs: 80 });
 
   // Effect to handle opening/closing modal from customer signal (handled by parent)
   useEffect(() => {
@@ -163,7 +163,7 @@ const AgentCatalog = ({
 
   return (
     <DialogContent
-      sx={{ p: 0, height: '80vh', display: 'flex', flexDirection: 'column' }}
+      sx={{ p: 0, height: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
     >
       {/* Filter Icon and Collapsible Filters Section */}
       <Box sx={{ p: 2, bgcolor: "grey.50", borderBottom: 1, borderColor: 'grey.200' }}>
@@ -365,7 +365,7 @@ const AgentCatalog = ({
       {/* Scrollable Packages Grid */}
       <Box
         ref={scrollRef}
-        id="agent-catalog-scroll"
+        id="shared-packages-scroll-agent"
         sx={{
           flex: 1,
           overflowY: 'auto',
