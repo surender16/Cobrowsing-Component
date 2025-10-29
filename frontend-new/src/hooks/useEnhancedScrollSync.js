@@ -39,6 +39,7 @@ export function useEnhancedScrollSync(arg1 = {}) {
   const lastAppliedRemoteTsRef = useRef(0)
   const lastAppliedRemotePosRef = useRef({ top: 0, left: 0, ts: 0 })
   const lastSentPosRef = useRef({ top: 0, left: 0, ts: 0 })
+  const isApplyingRemoteRef = useRef(false)
 
   const scrollEventQueueRef = useRef([])
   const isProcessingQueueRef = useRef(false)
@@ -95,6 +96,9 @@ export function useEnhancedScrollSync(arg1 = {}) {
     const el = scrollRef.current
     if (!el) return
 
+    // Prevent infinite loops by checking if we're currently applying a remote scroll
+    if (isApplyingRemoteRef.current) return
+
     lastRemotePayloadRef.current = payload
     if (rafApplyRef.current) return
 
@@ -104,6 +108,8 @@ export function useEnhancedScrollSync(arg1 = {}) {
       if (!latest) return
 
       if (!containerReadyRef.current) return
+
+      isApplyingRemoteRef.current = true
 
       const elMaxY = Math.max(1, el.scrollHeight - el.clientHeight)
       const elMaxX = Math.max(1, el.scrollWidth - el.clientWidth)
@@ -145,11 +151,15 @@ export function useEnhancedScrollSync(arg1 = {}) {
           behavior: smooth ? "smooth" : "auto",
         })
 
-        // Mark as synced after scroll completes
-        setTimeout(() => setSyncStatus("synced"), smooth ? 300 : 50)
+        // Mark as synced after scroll completes and reset the flag
+        setTimeout(() => {
+          setSyncStatus("synced")
+          isApplyingRemoteRef.current = false
+        }, smooth ? 300 : 50)
       } catch (error) {
         console.error("[scroll-sync][error] Failed to apply remote scroll:", error)
         setSyncStatus("idle")
+        isApplyingRemoteRef.current = false
       }
     })
   }, [])
@@ -239,6 +249,9 @@ export function useEnhancedScrollSync(arg1 = {}) {
   const handleLocalScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
+
+    // Prevent sending scroll events while applying remote scrolls to avoid loops
+    if (isApplyingRemoteRef.current) return
 
     const velocity = calculateScrollVelocity(el)
     scrollVelocityRef.current = velocity

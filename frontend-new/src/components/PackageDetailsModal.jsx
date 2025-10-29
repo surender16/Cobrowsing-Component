@@ -161,7 +161,8 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     }
   }, [syncError, userType]);
 
-  // Reset sync when modal opens
+
+  // Reset sync when modal opens 
   useEffect(() => {
     if (open) {
       resetSync();
