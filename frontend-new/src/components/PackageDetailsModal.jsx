@@ -145,9 +145,9 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
   // Backward-compatible flags (not used visually here)
   // const syncStatus = 'idle';
   const syncProgress = 0;
-  const syncError = null;  
+  const syncError = null;   
   const resetSync = () => { };
-
+ 
   // Add sync status indicator
   useEffect(() => {
     if (syncError) {
@@ -179,6 +179,9 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     incomingModalClose,
     incomingActivitiesModalOpen,
     incomingActivitiesModalClose,
+    incomingWishlistToggle,
+    incomingActivityToggle,
+    incomingActivitiesConfirm,
 
     // Action senders
     sendTabChange,
@@ -194,6 +197,9 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     sendModalClose,
     sendActivitiesModalOpen,
     sendActivitiesModalClose,
+    sendWishlistToggle,
+    sendActivityToggle,
+    sendActivitiesConfirm,
 
     // Utility functions
     clearIncomingActions,
@@ -255,7 +261,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       setShowActivitiesModal(true);
     }
   }, [incomingActivitiesModalOpen, userType]);
-
+ 
   useEffect(() => {
     if (incomingActivitiesModalClose) {
       console.log(`🎯 [${userType}] Received activities modal close signal:`, incomingActivitiesModalClose);
@@ -270,6 +276,22 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       setActiveTab(incomingTabChange.data.tabIndex);
     }
   }, [incomingTabChange, userType]);
+
+  // Wishlist toggle incoming sync
+  useEffect(() => {
+    if (incomingWishlistToggle && typeof incomingWishlistToggle.data?.isWishlisted === 'boolean') {
+      setIsWishlisted(incomingWishlistToggle.data.isWishlisted);
+    }
+  }, [incomingWishlistToggle]);
+
+  // Activities confirm incoming sync
+  useEffect(() => {
+    if (incomingActivitiesConfirm && Array.isArray(incomingActivitiesConfirm.data?.selectedActivityIds)) {
+      const ids = new Set(incomingActivitiesConfirm.data.selectedActivityIds);
+      const full = (packageData?.activities || []).filter(a => ids.has(a.id));
+      setSelectedActivities(full);
+    }
+  }, [incomingActivitiesConfirm, packageData]);
 
   // Effect to handle incoming image selections
   useEffect(() => {
@@ -503,7 +525,9 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
   // if (!packageData) return null;
 
   const toggleWishlist = () => {
-    setIsWishlisted(!isWishlisted);
+    const next = !isWishlisted;
+    setIsWishlisted(next);
+    sendWishlistToggle(next);
   };
 
   const handlePaymentSuccess = () => {
@@ -2822,6 +2846,8 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
         onActivitiesSelected={(activities) => {
           console.log(`🎯 [${userType}] Activities selected:`, activities);
           setSelectedActivities(activities);
+          const ids = activities.map(a => a.id);
+          sendActivitiesConfirm(ids);
         }}
         initialSelectedActivities={selectedActivities.map(a => a.id)}
       />

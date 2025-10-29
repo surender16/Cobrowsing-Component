@@ -29,8 +29,10 @@ export function useEnhancedScrollSync(arg1 = {}) {
   const containerReadyRef = useRef(false)
   const resizeObserverRef = useRef(null)
   const mutationObserverRef = useRef(null)
+  const intersectionObserverRef = useRef(null)
   const lastSizeStableTsRef = useRef(0)
   const sizeStableTimerRef = useRef(null)
+  const isVisibleRef = useRef(true)
 
   const lastScrollPosRef = useRef({ top: 0, left: 0, ts: 0 })
   const scrollVelocityRef = useRef(0)
@@ -44,6 +46,10 @@ export function useEnhancedScrollSync(arg1 = {}) {
 
   const isLeaderRef = useRef(false)
   const leaderTimeoutRef = useRef(null)
+  // Leader lease to prevent ping-pong and enable fast, deterministic handover
+  const leaseOwnerRef = useRef("none") // 'local' | 'remote' | 'none'
+  const leaseUntilTsRef = useRef(0)
+  const LEASE_MS = 700 // lease duration; renewed on activity
 
   const throttleTimerRef = useRef(null)
   const rafApplyRef = useRef(0)
@@ -53,7 +59,7 @@ export function useEnhancedScrollSync(arg1 = {}) {
   const [syncStatus, setSyncStatus] = useState("idle") // idle, syncing, synced
   const [sessionReadyKey, setSessionReadyKey] = useState(0)
   const pendingSendRef = useRef(null)
-  const isScrollingRef = useRef(false)
+  const isScrollingRef = useRef(false) 
 
   const markSizeStableSoon = useCallback(() => {
     if (sizeStableTimerRef.current) clearTimeout(sizeStableTimerRef.current)
@@ -244,6 +250,8 @@ export function useEnhancedScrollSync(arg1 = {}) {
   const handleLocalScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
+    // If element is not visible, avoid seizing control; let remote drive
+    if (!isVisibleRef.current) return
 
     const velocity = calculateScrollVelocity(el)
     scrollVelocityRef.current = velocity
@@ -265,19 +273,21 @@ export function useEnhancedScrollSync(arg1 = {}) {
     if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current)
     throttleTimerRef.current = setTimeout(sendScroll, adaptiveThrottle)
 
-    if (!isLeaderRef.current) {
-      isLeaderRef.current = true
-      setIsLeader(true)
-      console.info("[scroll-sync][leader] local became leader", containerId)
-
-      if (leaderTimeoutRef.current) clearTimeout(leaderTimeoutRef.current)
-      leaderTimeoutRef.current = setTimeout(() => {
-        if (Date.now() - lastLocalActivityTsRef.current > 1000) {
-          isLeaderRef.current = false
-          setIsLeader(false)
-          console.info("[scroll-sync][leader] relinquished leadership", containerId)
-        }
-      }, 1000)
+    // Acquire/renew local lease if allowed
+    const now = Date.now()
+    const leaseActive = now < leaseUntilTsRef.current
+    const remoteHasLease = leaseActive && leaseOwnerRef.current === 'remote'
+    // Do not preempt immediately if remote recently took control; wait small guard
+    const guardWindowMs = 180
+    const canPreempt = !remoteHasLease || (now - lastAppliedRemoteTsRef.current) > guardWindowMs
+    if (canPreempt) {
+      leaseOwnerRef.current = 'local'
+      leaseUntilTsRef.current = now + LEASE_MS
+      if (!isLeaderRef.current) {
+        isLeaderRef.current = true
+        setIsLeader(true)
+        console.info("[scroll-sync][leader] local became leader", containerId)
+      }
     }
   }, [calculateScrollVelocity, getAdaptiveThrottle, sendScroll, containerId])
 
@@ -314,6 +324,23 @@ export function useEnhancedScrollSync(arg1 = {}) {
       console.warn("[scroll-sync][error] MutationObserver not supported:", error)
     }
 
+    // IntersectionObserver: mark ready only when visible in viewport for smoother UX
+    try {
+      intersectionObserverRef.current = new IntersectionObserver((entries) => {
+        const entry = entries[0]
+        const isVisible = !!(entry && entry.isIntersecting && entry.intersectionRatio > 0)
+        isVisibleRef.current = isVisible
+        if (isVisible) {
+          // If visible and scrollable, mark ready; this avoids abrupt jumps when offscreen
+          const scrollable = (el.scrollHeight - el.clientHeight) > 0 || (el.scrollWidth - el.clientWidth) > 0
+          if (scrollable) containerReadyRef.current = true
+        }
+      }, { threshold: [0, 0.01, 0.1] })
+      intersectionObserverRef.current.observe(el)
+    } catch (error) {
+      // Older browsers: ignore
+    }
+
     markSizeStableSoon()
 
     // rAF readiness: mark ready when element becomes scrollable without manual refresh
@@ -332,6 +359,7 @@ export function useEnhancedScrollSync(arg1 = {}) {
     return () => {
       if (resizeObserverRef.current) resizeObserverRef.current.disconnect()
       if (mutationObserverRef.current) mutationObserverRef.current.disconnect()
+      if (intersectionObserverRef.current) intersectionObserverRef.current.disconnect()
       if (sizeStableTimerRef.current) clearTimeout(sizeStableTimerRef.current)
       if (rafReadyCheckRef.current) cancelAnimationFrame(rafReadyCheckRef.current)
     }
@@ -349,7 +377,10 @@ export function useEnhancedScrollSync(arg1 = {}) {
 
     const onUserIntent = () => {
       // Instantly take control and send first frame
-      lastLocalActivityTsRef.current = Date.now()
+      const now = Date.now()
+      lastLocalActivityTsRef.current = now
+      leaseOwnerRef.current = 'local'
+      leaseUntilTsRef.current = now + LEASE_MS
       if (!isLeaderRef.current) {
         isLeaderRef.current = true
         setIsLeader(true)
@@ -379,6 +410,7 @@ export function useEnhancedScrollSync(arg1 = {}) {
       el.removeEventListener("pointerdown", onUserIntent)
       el.removeEventListener("touchstart", onUserIntent)
       el.removeEventListener("touchmove", onUserIntent)
+      window.removeEventListener("keydown", onKey)
     }
   }, [enabled, processScrollQueue, sendScrollImmediate, containerId])
 
@@ -413,7 +445,7 @@ export function useEnhancedScrollSync(arg1 = {}) {
     const el = scrollRef.current
     if (!el) {
       console.warn("[scroll-sync] No element attached for containerId:", containerId)
-      return
+      return  
     }
     const isScrollable = (el.scrollHeight - el.clientHeight) > 0 || (el.scrollWidth - el.clientWidth) > 0
     if (!isScrollable) {
@@ -423,6 +455,62 @@ export function useEnhancedScrollSync(arg1 = {}) {
       })
     }
   }, [containerId, enabled])
+
+  // Auto-attach: if no element attached, try to detect a scrollable container automatically
+  useEffect(() => {
+    if (!enabled) return
+    if (scrollRef.current) return
+
+    const findScrollable = () => {
+      // Priority selectors
+      const selectors = [
+        `[data-scroll-sync="${containerId}"]`,
+        `[data-cobrowse-scroll]`,
+        `.scroll-sync-${containerId}`,
+      ]
+      let el = null
+      for (const sel of selectors) {
+        el = document.querySelector(sel)
+        if (el) break
+      }
+      if (!el) {
+        // Fallback: choose the tallest scrollable element in the document
+        const candidates = Array.from(document.querySelectorAll('*'))
+          .filter((n) => n instanceof HTMLElement)
+          .filter((n) => (n.scrollHeight - n.clientHeight) > 0 || (n.scrollWidth - n.clientWidth) > 0)
+        if (candidates.length > 0) {
+          candidates.sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))
+          el = candidates[0]
+        }
+      }
+      if (el) {
+        scrollRef.current = el
+        // trigger readiness pipeline for newly attached element
+        try { el.dispatchEvent(new Event('scroll')) } catch {}
+      }
+    }
+
+    // Initial attempt and observe DOM for late mounts
+    findScrollable()
+    // Use IntersectionObserver to smoothly react when a matching element appears in view
+    let io
+    try {
+      io = new IntersectionObserver(() => {
+        if (!scrollRef.current) findScrollable()
+      }, { root: null, threshold: [0, 0.01] })
+      // Observe broad candidates lightly; fall back to MutationObserver below if needed
+      io.observe(document.documentElement)
+    } catch {}
+
+    const mo = new MutationObserver(() => {
+      if (!scrollRef.current) findScrollable()
+    })
+    try { mo.observe(document.documentElement, { childList: true, subtree: true }) } catch {}
+    return () => {
+      try { mo.disconnect() } catch {}
+      try { io && io.disconnect() } catch {}
+    }
+  }, [enabled, containerId])
 
   // OpenTok receiver
   useEffect(() => {
@@ -445,10 +533,19 @@ export function useEnhancedScrollSync(arg1 = {}) {
         if (!(Number.isFinite(data.pxY) || Number.isFinite(data.percentY))) return
 
         const now = Date.now()
-        if (now - lastLocalActivityTsRef.current > 150 && isLeaderRef.current) {
-          isLeaderRef.current = false
-          setIsLeader(false)
-          console.info("[scroll-sync][leader] remote became leader", containerId)
+        // Remote attempts to acquire/renew lease; prioritize remote if local is not visible
+        const leaseActive = now < leaseUntilTsRef.current
+        const localHasLease = leaseActive && leaseOwnerRef.current === 'local'
+        const quietLocally = (now - lastLocalActivityTsRef.current) > 180
+        const localInvisible = !isVisibleRef.current
+        if (!localHasLease || quietLocally || localInvisible) {
+          leaseOwnerRef.current = 'remote'
+          leaseUntilTsRef.current = now + LEASE_MS
+          if (isLeaderRef.current) {
+            isLeaderRef.current = false
+            setIsLeader(false)
+            console.info("[scroll-sync][leader] remote became leader", containerId)
+          }
         }
 
         applyRemote(data)

@@ -1186,7 +1186,7 @@ const TourComparisonModal = ({ open, onClose, compareList, onClearComparison, ge
   };
 
   // Add sync status indicator in title
-  const renderSyncStatus = () => (
+  const renderSyncStatus = () => ( 
     <Chip
       label={isActiveController ? "CONTROLLING" : "SYNCED"}
       size="small" 

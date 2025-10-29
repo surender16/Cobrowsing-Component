@@ -26,6 +26,9 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
   const [incomingModalClose, setIncomingModalClose] = useState(null);
   const [incomingActivitiesModalOpen, setIncomingActivitiesModalOpen] = useState(null);
   const [incomingActivitiesModalClose, setIncomingActivitiesModalClose] = useState(null);
+  const [incomingWishlistToggle, setIncomingWishlistToggle] = useState(null);
+  const [incomingActivityToggle, setIncomingActivityToggle] = useState(null);
+  const [incomingActivitiesConfirm, setIncomingActivitiesConfirm] = useState(null);
 
   // Use the singleton's ref to prevent signal loops
   const isProcessingIncomingActionRef = useRef(false);
@@ -241,6 +244,72 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
     session.on('signal:payment-button-click', onButtonClick);
     session.on('signal:payment-success', onSuccess);
 
+    // Unified consolidated signals for package details actions
+    const onPackageDetailsSync = (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        if (payload.userType === userType) return;
+        const { action, data } = payload;
+        switch (action) {
+          case 'wishlist-toggle':
+            setIncomingWishlistToggle({ userType: payload.userType, data });
+            break;
+          case 'activity-toggle':
+            setIncomingActivityToggle({ userType: payload.userType, data });
+            break;
+          case 'activities-confirm':
+            setIncomingActivitiesConfirm({ userType: payload.userType, data });
+            break;
+          case 'tab-change':
+            setIncomingTabChange({ userType: payload.userType, data });
+            break;
+          case 'image-select':
+            setIncomingImageSelect({ userType: payload.userType, data });
+            break;
+          case 'day-select':
+            setIncomingDaySelect({ userType: payload.userType, data });
+            break;
+          case 'fullscreen-toggle':
+            setIncomingFullscreenToggle({ userType: payload.userType, data });
+            break;
+          case 'slideshow-toggle':
+            setIncomingSlideshowToggle({ userType: payload.userType, data });
+            break;
+          case 'image-navigate':
+            setIncomingImageNavigate({ userType: payload.userType, data: { imageIndex: data?.newIndex } });
+            break;
+          case 'zoom-change':
+            setIncomingZoomChange({ userType: payload.userType, data });
+            break;
+          case 'activities-modal-open':
+            setIncomingActivitiesModalOpen({ userType: payload.userType, data });
+            break;
+          case 'activities-modal-close':
+            setIncomingActivitiesModalClose({ userType: payload.userType, data });
+            break;
+          default:
+            break;
+        }
+      } catch (e) { console.error('package-details-sync parse error', e); }
+    };
+
+    // Unified consolidated signals for payment flow
+    const onPaymentFlowSync = (event) => {
+      try {
+        const payload = JSON.parse(event.data || '{}');
+        if (payload.userType === userType) return;
+        const { action, data } = payload;
+        if (action === 'payment-field-change') {
+          setIncomingPaymentFieldChange({ userType: payload.userType, data: { fieldName: data.fieldName, fieldValue: data.value } });
+        } else {
+          setIncomingPaymentAction({ action, userType: payload.userType, data });
+        }
+      } catch (e) { console.error('payment-flow-sync parse error', e); }
+    };
+
+    session.on('signal:package-details-sync', onPackageDetailsSync);
+    session.on('signal:payment-flow-sync', onPaymentFlowSync);
+
     return () => {
       try {
         session.off('signal:payment-modal-opened', onModalOpened);
@@ -249,6 +318,8 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
         session.off('signal:payment-field-change', onFieldChange);
         session.off('signal:payment-button-click', onButtonClick);
         session.off('signal:payment-success', onSuccess);
+        session.off('signal:package-details-sync', onPackageDetailsSync);
+        session.off('signal:payment-flow-sync', onPaymentFlowSync);
       } catch (e) {
         console.warn('Cleanup payment listeners failed', e);
       }
@@ -289,6 +360,15 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
 
     console.log(`📦 [${userType}] Sending slideshow toggle:`, isSlideshow);
     packageDetailsCoBrowseSingleton.sendAction('slideshow-toggle', { isSlideshow }, userType);
+  }, [enabled, userType]);
+
+  const sendWishlistToggle = useCallback((isWishlisted) => {
+    if (!enabled || packageDetailsCoBrowseSingleton.isIncomingActionRef.current) return;
+    packageDetailsCoBrowseSingleton.sendAction('wishlist-toggle', { isWishlisted }, userType);
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (session) {
+      openTokSessionSingleton.sendSignal({ type: 'package-details-sync', data: JSON.stringify({ action: 'wishlist-toggle', userType, data: { isWishlisted }, timestamp: Date.now() }) });
+    }
   }, [enabled, userType]);
 
   const sendImageNavigate = useCallback((imageIndex) => {
@@ -340,6 +420,9 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
       });
     };
     sendOnce();
+    // Also broadcast consolidated channel
+    const consolidated = { action: actionType, userType, data: payload, timestamp: Date.now() };
+    openTokSessionSingleton.sendSignal({ type: 'payment-flow-sync', data: JSON.stringify(consolidated) }, () => {});
   }, [enabled, userType]);
 
   const sendModalOpen = useCallback((packageData) => {
@@ -384,6 +467,10 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
 
     console.log(`🎯 [${userType}] Sending activities modal open`);
     packageDetailsCoBrowseSingleton.sendAction('activities-modal-open', {}, userType);
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (session) {
+      openTokSessionSingleton.sendSignal({ type: 'package-details-sync', data: JSON.stringify({ action: 'activities-modal-open', userType, data: {}, timestamp: Date.now() }) });
+    }
   }, [enabled, userType]);
 
   const sendActivitiesModalClose = useCallback(() => {
@@ -391,6 +478,28 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
 
     console.log(`🎯 [${userType}] Sending activities modal close`);
     packageDetailsCoBrowseSingleton.sendAction('activities-modal-close', {}, userType);
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (session) {
+      openTokSessionSingleton.sendSignal({ type: 'package-details-sync', data: JSON.stringify({ action: 'activities-modal-close', userType, data: {}, timestamp: Date.now() }) });
+    }
+  }, [enabled, userType]);
+
+  const sendActivityToggle = useCallback((activityId, selected) => {
+    if (!enabled || packageDetailsCoBrowseSingleton.isIncomingActionRef.current) return;
+    packageDetailsCoBrowseSingleton.sendAction('activity-toggle', { activityId, selected }, userType);
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (session) {
+      openTokSessionSingleton.sendSignal({ type: 'package-details-sync', data: JSON.stringify({ action: 'activity-toggle', userType, data: { activityId, selected }, timestamp: Date.now() }) });
+    }
+  }, [enabled, userType]);
+
+  const sendActivitiesConfirm = useCallback((selectedActivityIds = []) => {
+    if (!enabled || packageDetailsCoBrowseSingleton.isIncomingActionRef.current) return;
+    packageDetailsCoBrowseSingleton.sendAction('activities-confirm', { selectedActivityIds }, userType);
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (session) {
+      openTokSessionSingleton.sendSignal({ type: 'package-details-sync', data: JSON.stringify({ action: 'activities-confirm', userType, data: { selectedActivityIds }, timestamp: Date.now() }) });
+    }
   }, [enabled, userType]);
 
   const sendPaymentFieldChange = useCallback((fieldName, fieldValue) => {
@@ -431,6 +540,9 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
     setIncomingModalClose(null);
     setIncomingActivitiesModalOpen(null);
     setIncomingActivitiesModalClose(null);
+    setIncomingWishlistToggle(null);
+    setIncomingActivityToggle(null);
+    setIncomingActivitiesConfirm(null);
   }, []);
 
   return {
@@ -450,6 +562,9 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
     incomingModalClose,
     incomingActivitiesModalOpen,
     incomingActivitiesModalClose,
+    incomingWishlistToggle,
+    incomingActivityToggle,
+    incomingActivitiesConfirm,
 
     // Action senders
     sendTabChange,
@@ -467,6 +582,9 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
     sendModalClose,
     sendActivitiesModalOpen,
     sendActivitiesModalClose,
+    sendWishlistToggle,
+    sendActivityToggle,
+    sendActivitiesConfirm,
 
     // Utility functions
     clearIncomingActions,
