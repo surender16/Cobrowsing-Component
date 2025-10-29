@@ -185,6 +185,7 @@ export function useEnhancedScrollSync(arg1 = {}) {
     }
   }, [])
 
+  
   const sendScroll = useCallback(() => {
     if (!enabled) return
     const el = scrollRef.current
@@ -250,7 +251,7 @@ export function useEnhancedScrollSync(arg1 = {}) {
   const handleLocalScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    // If element is not visible, avoid seizing control; let remote drive
+    // If element is not visible in viewport, don't become leader
     if (!isVisibleRef.current) return
 
     const velocity = calculateScrollVelocity(el)
@@ -273,21 +274,15 @@ export function useEnhancedScrollSync(arg1 = {}) {
     if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current)
     throttleTimerRef.current = setTimeout(sendScroll, adaptiveThrottle)
 
-    // Acquire/renew local lease if allowed
+    // Become leader immediately when scrolling in viewport
+    // This ensures the side actively viewing and scrolling the modal controls it
     const now = Date.now()
-    const leaseActive = now < leaseUntilTsRef.current
-    const remoteHasLease = leaseActive && leaseOwnerRef.current === 'remote'
-    // Do not preempt immediately if remote recently took control; wait small guard
-    const guardWindowMs = 180
-    const canPreempt = !remoteHasLease || (now - lastAppliedRemoteTsRef.current) > guardWindowMs
-    if (canPreempt) {
-      leaseOwnerRef.current = 'local'
-      leaseUntilTsRef.current = now + LEASE_MS
-      if (!isLeaderRef.current) {
-        isLeaderRef.current = true
-        setIsLeader(true)
-        console.info("[scroll-sync][leader] local became leader", containerId)
-      }
+    leaseOwnerRef.current = 'local'
+    leaseUntilTsRef.current = now + LEASE_MS
+    if (!isLeaderRef.current) {
+      isLeaderRef.current = true
+      setIsLeader(true)
+      console.info("[scroll-sync][leader] local became leader (scrolling in viewport)", containerId)
     }
   }, [calculateScrollVelocity, getAdaptiveThrottle, sendScroll, containerId])
 
@@ -376,15 +371,18 @@ export function useEnhancedScrollSync(arg1 = {}) {
     }
 
     const onUserIntent = () => {
-      // Instantly take control and send first frame
+      // Instantly take control and send first frame, but only if element is visible in viewport
+      if (!isVisibleRef.current) return
+
       const now = Date.now()
       lastLocalActivityTsRef.current = now
       leaseOwnerRef.current = 'local'
       leaseUntilTsRef.current = now + LEASE_MS
+
       if (!isLeaderRef.current) {
         isLeaderRef.current = true
         setIsLeader(true)
-        console.info("[scroll-sync][leader] local became leader (intent)", containerId)
+        console.info("[scroll-sync][leader] local became leader (user intent in viewport)", containerId)
       }
       if (!isScrollingRef.current) {
         isScrollingRef.current = true
@@ -533,18 +531,20 @@ export function useEnhancedScrollSync(arg1 = {}) {
         if (!(Number.isFinite(data.pxY) || Number.isFinite(data.percentY))) return
 
         const now = Date.now()
-        // Remote attempts to acquire/renew lease; prioritize remote if local is not visible
+        // Remote attempts to acquire/renew lease; prioritize remote if local is not visible in viewport
         const leaseActive = now < leaseUntilTsRef.current
         const localHasLease = leaseActive && leaseOwnerRef.current === 'local'
         const quietLocally = (now - lastLocalActivityTsRef.current) > 180
         const localInvisible = !isVisibleRef.current
+
+        // If local is not visible in viewport, let remote take control
         if (!localHasLease || quietLocally || localInvisible) {
           leaseOwnerRef.current = 'remote'
           leaseUntilTsRef.current = now + LEASE_MS
           if (isLeaderRef.current) {
             isLeaderRef.current = false
             setIsLeader(false)
-            console.info("[scroll-sync][leader] remote became leader", containerId)
+            console.info("[scroll-sync][leader] remote became leader (local not in viewport)", containerId)
           }
         }
 

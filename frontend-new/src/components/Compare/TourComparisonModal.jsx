@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
-  DialogContent,
+  DialogContent, 
   DialogActions,
   Box,
   Typography,
