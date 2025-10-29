@@ -261,13 +261,13 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
             setIncomingActivitiesConfirm({ userType: payload.userType, data });
             break;
           case 'tab-change':
-            setIncomingTabChange({ userType: payload.userType, data });
+            setIncomingTabChange({ userType: payload.userType, data: { tabIndex: data?.tabIndex } });
             break;
           case 'image-select':
             setIncomingImageSelect({ userType: payload.userType, data });
             break;
           case 'day-select':
-            setIncomingDaySelect({ userType: payload.userType, data });
+            setIncomingDaySelect({ userType: payload.userType, data: { dayIndex: data?.dayIndex } });
             break;
           case 'fullscreen-toggle':
             setIncomingFullscreenToggle({ userType: payload.userType, data });
@@ -332,6 +332,12 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
 
     console.log(`📦 [${userType}] Sending tab change:`, tabIndex);
     packageDetailsCoBrowseSingleton.sendAction('tab-change', { tabIndex }, userType);
+
+    // Also send via OpenTok consolidated channel for better sync
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (session) {
+      openTokSessionSingleton.sendSignal({ type: 'package-details-sync', data: JSON.stringify({ action: 'tab-change', userType, data: { tabIndex }, timestamp: Date.now() }) });
+    }
   }, [enabled, userType]);
 
   const sendImageSelect = useCallback((imageIndex) => {
@@ -346,6 +352,12 @@ export const usePackageDetailsCoBrowse = (userType = 'agent', enabled = true) =>
 
     console.log(`📦 [${userType}] Sending day select:`, dayIndex);
     packageDetailsCoBrowseSingleton.sendAction('day-select', { dayIndex }, userType);
+
+    // Also send via OpenTok consolidated channel for better sync
+    const session = openTokSessionSingleton.getSession && openTokSessionSingleton.getSession();
+    if (session) {
+      openTokSessionSingleton.sendSignal({ type: 'package-details-sync', data: JSON.stringify({ action: 'day-select', userType, data: { dayIndex }, timestamp: Date.now() }) });
+    }
   }, [enabled, userType]);
 
   const sendFullscreenToggle = useCallback((isFullscreen) => {

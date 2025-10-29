@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef,useCallback  } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -8,7 +8,7 @@ import {
   Grid,
   Card,
   CardMedia,
-  Chip,
+  Chip, 
   Button,
   Paper,
   Stack,
@@ -141,11 +141,17 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
 
   // Use scroll sync hook for package details (enabled only when modal is open)
   // New unified scroll sync (percent-based via OpenTok)
-  const { scrollRef, isLeader, syncStatus } = useEnhancedScrollSync({ containerId: 'package-details', userType, enabled: open, throttleMs: 100 });
+  const { scrollRef, isLeader, syncStatus } = useEnhancedScrollSync({
+    containerId: 'package-details',
+    userType,
+    enabled: open,
+    throttleMs: 30, // Very fast throttle for smooth sync
+    immediate: true // Enable immediate sync
+  });
   // Backward-compatible flags (not used visually here)
   // const syncStatus = 'idle';
   const syncProgress = 0;
-  const syncError = null;   
+  const syncError = null;
   const resetSync = () => { };
  
   // Add sync status indicator
@@ -234,7 +240,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       console.log(`📦 [${userType}] Received modal open signal for package:`, incomingModalOpen.data.packageData.id);
       // This will be handled by parent components
     }
-  }, [incomingModalOpen, userType]);
+  }, [incomingModalOpen]);
 
   // Track if close was initiated by incoming signal
   const closeFromSignalRef = React.useRef(false);
@@ -260,14 +266,14 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       console.log(`🎯 [${userType}] Received activities modal open signal:`, incomingActivitiesModalOpen);
       setShowActivitiesModal(true);
     }
-  }, [incomingActivitiesModalOpen, userType]);
- 
+  }, [incomingActivitiesModalOpen]);
+
   useEffect(() => {
     if (incomingActivitiesModalClose) {
       console.log(`🎯 [${userType}] Received activities modal close signal:`, incomingActivitiesModalClose);
       setShowActivitiesModal(false);
     }
-  }, [incomingActivitiesModalClose, userType]);
+  }, [incomingActivitiesModalClose]);
 
   // Effect to handle incoming tab changes
   useEffect(() => {
@@ -275,7 +281,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       console.log(`📦 [${userType}] Received tab change:`, incomingTabChange.data.tabIndex);
       setActiveTab(incomingTabChange.data.tabIndex);
     }
-  }, [incomingTabChange, userType]);
+  }, [incomingTabChange]);
 
   // Wishlist toggle incoming sync
   useEffect(() => {
@@ -299,12 +305,20 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       console.log(`📦 [${userType}] Received image select:`, incomingImageSelect.data.imageIndex);
       setSelectedImageIndex(incomingImageSelect.data.imageIndex);
     }
-  }, [incomingImageSelect, userType]);
+  }, [incomingImageSelect]);
 
   // Effect to handle incoming day selections
   useEffect(() => {
     if (incomingDaySelect && incomingDaySelect.data?.dayIndex !== undefined) {
       console.log(`📦 [${userType}] Received day select:`, incomingDaySelect.data.dayIndex);
+      setSelectedDay(incomingDaySelect.data.dayIndex);
+    }
+  }, [incomingDaySelect]);
+
+  // Effect to handle incoming day selections from legacy sync
+  useEffect(() => {
+    if (incomingDaySelect && incomingDaySelect.data?.dayIndex !== undefined) {
+      console.log(`📦 [${userType}] Received day select (legacy):`, incomingDaySelect.data.dayIndex);
       setSelectedDay(incomingDaySelect.data.dayIndex);
     }
   }, [incomingDaySelect, userType]);
@@ -315,7 +329,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       console.log(`📦 [${userType}] Received fullscreen toggle:`, incomingFullscreenToggle.data.isFullscreen);
       setIsImageFullscreen(incomingFullscreenToggle.data.isFullscreen);
     }
-  }, [incomingFullscreenToggle, userType]);
+  }, [incomingFullscreenToggle]);
 
   // Effect to handle incoming slideshow toggle
   useEffect(() => {
@@ -323,7 +337,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       console.log(`📦 [${userType}] Received slideshow toggle:`, incomingSlideshowToggle.data.isSlideshow);
       setIsImageSlideshow(incomingSlideshowToggle.data.isSlideshow);
     }
-  }, [incomingSlideshowToggle, userType]);
+  }, [incomingSlideshowToggle]);
 
   // Effect to handle incoming image navigation
   useEffect(() => {
@@ -331,7 +345,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       console.log(`📦 [${userType}] Received image navigate:`, incomingImageNavigate.data.imageIndex);
       setSelectedImageIndex(incomingImageNavigate.data.imageIndex);
     }
-  }, [incomingImageNavigate, userType]);
+  }, [incomingImageNavigate]);
 
   // Effect to handle incoming zoom changes
   useEffect(() => {
@@ -339,7 +353,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       console.log(`📦 [${userType}] Received zoom change:`, incomingZoomChange.data.zoomLevel);
       setImageZoom(incomingZoomChange.data.zoomLevel);
     }
-  }, [incomingZoomChange, userType]);
+  }, [incomingZoomChange]);
 
   // The useCoBrowseScrollSync hook handles incoming scroll sync internally
   // No need for duplicate handling here
@@ -350,7 +364,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
       console.log(`📦 [${userType}] Received comparison action:`, incomingComparisonAction.data);
       // This will be handled by parent components
     }
-  }, [incomingComparisonAction, userType]);
+  }, [incomingComparisonAction]);
 
   // Effect to handle incoming payment actions (removed duplicate - now handled in line ~508)
 
@@ -379,34 +393,40 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     const hasIncomingActions = incomingTabChange || incomingImageSelect || incomingDaySelect ||
       incomingFullscreenToggle || incomingSlideshowToggle || incomingImageNavigate ||
       incomingZoomChange || incomingComparisonAction ||
-      incomingPaymentAction || incomingPaymentFieldChange || incomingModalOpen || incomingModalClose;
+      incomingPaymentAction || incomingPaymentFieldChange || incomingModalOpen || incomingModalClose ||
+      incomingActivitiesModalOpen || incomingActivitiesModalClose || incomingWishlistToggle ||
+      incomingActivityToggle || incomingActivitiesConfirm;
 
     if (hasIncomingActions) {
       // Clear after a short delay to ensure processing is complete
       setTimeout(() => {
         clearIncomingActions();
-      }, 100);
+      }, 50); // Reduced delay for faster response
     }
   }, [incomingTabChange, incomingImageSelect, incomingDaySelect, incomingFullscreenToggle,
     incomingSlideshowToggle, incomingImageNavigate, incomingZoomChange,
     incomingComparisonAction, incomingPaymentAction, incomingPaymentFieldChange, incomingModalOpen, incomingModalClose,
+    incomingActivitiesModalOpen, incomingActivitiesModalClose, incomingWishlistToggle,
+    incomingActivityToggle, incomingActivitiesConfirm,
     clearIncomingActions]);
 
   // Enhanced handlers with bidirectional sync
-  const handleTabChange = (event, newValue) => {
+  const handleTabChange = useCallback((event, newValue) => {
+    console.log(`📦 [${userType}] handleTabChange called with newValue:`, newValue);
     setActiveTab(newValue);
     sendTabChange(newValue);
-  };
+  }, [sendTabChange]);
 
   const handleImageSelect = (index) => {
     setSelectedImageIndex(index);
     sendImageSelect(index);
   };
 
-  const handleDaySelect = (index) => {
+  const handleDaySelect = useCallback((index) => {
+    console.log(`📦 [${userType}] handleDaySelect called with index:`, index);
     setSelectedDay(index);
     sendDaySelect(index);
-  };
+  }, [sendDaySelect]);
 
   const toggleImageFullscreen = () => {
     const newFullscreenState = !isImageFullscreen;
@@ -478,6 +498,21 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
     }
   }, [open, scrollRef]);
 
+  // Force scroll sync initialization when modal opens
+  useEffect(() => {
+    if (open && scrollRef.current) {
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        if (scrollRef.current) {
+          // Trigger a small scroll event to initialize sync
+          const currentScrollTop = scrollRef.current.scrollTop;
+          scrollRef.current.scrollTop = currentScrollTop + 1;
+          scrollRef.current.scrollTop = currentScrollTop;
+        }
+      }, 100);
+    }
+  }, [open, scrollRef]);
+
 
   useEffect(() => {
     if (isImageSlideshow && packageData?.images?.length) {
@@ -519,7 +554,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
         setPaymentStep(0);
       }
     }
-  }, [incomingPaymentAction, userType]);
+  }, [incomingPaymentAction]);
 
   // Don't return null immediately, let the modal render and show loading state
   // if (!packageData) return null;
@@ -1631,6 +1666,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
                           bgcolor: 'primary.100',
                         },
                         transition: 'all 0.3s ease',
+                        cursor: 'pointer',
                       }}
                     >
                       <ListItemIcon>
