@@ -4,17 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { openTokSessionSingleton } from "../services/OpenTokSessionManager"
 
 /**
- * Enhanced scroll sync hook for OpenTok co-browsing
- * Fixes: Fast scroll handling, smooth sync, adaptive throttling, better echo prevention
+ * Enhanced scroll sync hook for OpenTok co-browsing with parallel control
+ * Enables simultaneous scrolling on both sides without leader election
  *
  * Features:
  * - Adaptive throttling based on scroll velocity (30-150ms)
  * - Event queue for rapid scroll events
- * - Velocity-aware echo prevention
+ * - Continuous bidirectional sync without echo prevention
  * - Smooth scrolling for small adjustments, instant for large jumps
  * - Comprehensive error handling with retry logic
- * - Reduced hysteresis (150ms) for faster response
- * - Better leader election without conflicts
+ * - Parallel control allowing both sides to scroll simultaneously
  */
 export function useEnhancedScrollSync(arg1 = {}) {
   // Support both signatures:
@@ -44,22 +43,16 @@ export function useEnhancedScrollSync(arg1 = {}) {
   const scrollEventQueueRef = useRef([])
   const isProcessingQueueRef = useRef(false)
 
-  const isLeaderRef = useRef(false)
-  const leaderTimeoutRef = useRef(null)
-  // Leader lease to prevent ping-pong and enable fast, deterministic handover
-  const leaseOwnerRef = useRef("none") // 'local' | 'remote' | 'none'
-  const leaseUntilTsRef = useRef(0)
-  const LEASE_MS = 700 // lease duration; renewed on activity
+  // Removed leader election system for parallel control
 
   const throttleTimerRef = useRef(null)
   const rafApplyRef = useRef(0)
   const rafReadyCheckRef = useRef(0)
   const localSourceId = useMemo(() => `${userType}-${Math.random().toString(36).slice(2)}`, [userType])
-  const [isLeader, setIsLeader] = useState(false)
   const [syncStatus, setSyncStatus] = useState("idle") // idle, syncing, synced
   const [sessionReadyKey, setSessionReadyKey] = useState(0)
   const pendingSendRef = useRef(null)
-  const isScrollingRef = useRef(false) 
+  const isScrollingRef = useRef(false)
 
   const markSizeStableSoon = useCallback(() => {
     if (sizeStableTimerRef.current) clearTimeout(sizeStableTimerRef.current)
@@ -112,11 +105,6 @@ export function useEnhancedScrollSync(arg1 = {}) {
 
       if (!containerReadyRef.current) return
 
-      const now = Date.now()
-      const noLocalFor = now - lastLocalActivityTsRef.current
-
-      if (noLocalFor < 150) return
-
       const elMaxY = Math.max(1, el.scrollHeight - el.clientHeight)
       const elMaxX = Math.max(1, el.scrollWidth - el.clientWidth)
 
@@ -146,8 +134,8 @@ export function useEnhancedScrollSync(arg1 = {}) {
 
       const smooth = totalDist < 150
 
-      lastAppliedRemoteTsRef.current = now
-      lastAppliedRemotePosRef.current = { top: targetY, left: targetX, ts: now }
+      lastAppliedRemoteTsRef.current = Date.now()
+      lastAppliedRemotePosRef.current = { top: targetY, left: targetX, ts: Date.now() }
       setSyncStatus("syncing")
 
       try {
@@ -251,15 +239,9 @@ export function useEnhancedScrollSync(arg1 = {}) {
   const handleLocalScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
-    // If element is not visible in viewport, don't become leader
-    if (!isVisibleRef.current) return
 
     const velocity = calculateScrollVelocity(el)
     scrollVelocityRef.current = velocity
-    // Velocity-aware echo window per spec
-    const echoWindow = velocity > 2 ? 50 : velocity > 1 ? 80 : 150
-
-    if (Date.now() - lastAppliedRemoteTsRef.current < echoWindow) return
 
     lastLocalActivityTsRef.current = Date.now()
 
@@ -274,16 +256,8 @@ export function useEnhancedScrollSync(arg1 = {}) {
     if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current)
     throttleTimerRef.current = setTimeout(sendScroll, adaptiveThrottle)
 
-    // Become leader immediately when scrolling in viewport
-    // This ensures the side actively viewing and scrolling the modal controls it
-    const now = Date.now()
-    leaseOwnerRef.current = 'local'
-    leaseUntilTsRef.current = now + LEASE_MS
-    if (!isLeaderRef.current) {
-      isLeaderRef.current = true
-      setIsLeader(true)
-      console.info("[scroll-sync][leader] local became leader (scrolling in viewport)", containerId)
-    }
+    // Ensure continuous sync by always sending updates
+    // No echo prevention - both sides can scroll simultaneously
   }, [calculateScrollVelocity, getAdaptiveThrottle, sendScroll, containerId])
 
   const attach = useCallback((el) => {
@@ -371,19 +345,9 @@ export function useEnhancedScrollSync(arg1 = {}) {
     }
 
     const onUserIntent = () => {
-      // Instantly take control and send first frame, but only if element is visible in viewport
-      if (!isVisibleRef.current) return
-
       const now = Date.now()
       lastLocalActivityTsRef.current = now
-      leaseOwnerRef.current = 'local'
-      leaseUntilTsRef.current = now + LEASE_MS
 
-      if (!isLeaderRef.current) {
-        isLeaderRef.current = true
-        setIsLeader(true)
-        console.info("[scroll-sync][leader] local became leader (user intent in viewport)", containerId)
-      }
       if (!isScrollingRef.current) {
         isScrollingRef.current = true
         sendScrollImmediate()
@@ -530,24 +494,6 @@ export function useEnhancedScrollSync(arg1 = {}) {
         if (!(data.ts && Math.abs(Date.now() - data.ts) < 1000)) return
         if (!(Number.isFinite(data.pxY) || Number.isFinite(data.percentY))) return
 
-        const now = Date.now()
-        // Remote attempts to acquire/renew lease; prioritize remote if local is not visible in viewport
-        const leaseActive = now < leaseUntilTsRef.current
-        const localHasLease = leaseActive && leaseOwnerRef.current === 'local'
-        const quietLocally = (now - lastLocalActivityTsRef.current) > 180
-        const localInvisible = !isVisibleRef.current
-
-        // If local is not visible in viewport, let remote take control
-        if (!localHasLease || quietLocally || localInvisible) {
-          leaseOwnerRef.current = 'remote'
-          leaseUntilTsRef.current = now + LEASE_MS
-          if (isLeaderRef.current) {
-            isLeaderRef.current = false
-            setIsLeader(false)
-            console.info("[scroll-sync][leader] remote became leader (local not in viewport)", containerId)
-          }
-        }
-
         applyRemote(data)
       } catch (e) {
         console.error("[scroll-sync][error] parse", e)
@@ -566,7 +512,6 @@ export function useEnhancedScrollSync(arg1 = {}) {
   useEffect(
     () => () => {
       if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current)
-      if (leaderTimeoutRef.current) clearTimeout(leaderTimeoutRef.current)
       if (rafApplyRef.current) cancelAnimationFrame(rafApplyRef.current)
     },
     [],
@@ -575,12 +520,7 @@ export function useEnhancedScrollSync(arg1 = {}) {
   return {
     scrollRef,
     attach,
-    isLeader,
     syncStatus,
-    setLeader: (v) => {
-      isLeaderRef.current = !!v
-      setIsLeader(!!v)
-    },
     setContainerReady,
   }
 }

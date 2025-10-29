@@ -779,7 +779,7 @@ const PackageDetailsModal = ({ open, onClose, packageData, userType = 'customer'
                     fontWeight: 'bold',
                   }}
                 />
-              </Zoom>
+              </Zoom> 
             </Box>
           </Fade>
         </Box>
